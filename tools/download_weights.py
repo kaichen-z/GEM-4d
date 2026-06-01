@@ -3,10 +3,12 @@
     da3            DepthAnything-3 geometry teacher (DA3-LARGE-1.1), from ``zhouk777/gem4d-weight``
                    (dataset)                                                (~1.6 GB) -> geometry.teacher
     wan2.2       Wan-AI/Wan2.2-TI2V-5B-Diffusers  (GEM-4D Wan-5B base)       (~34 GB)  -> backbone.base_model
+    wan2.1       Wan-AI/Wan2.1-I2V-14B-480P       (GEM-4D Wan-14B base)      (~82 GB)  -> backbone.base_model
 
 Usage
 -----
     python tools/download_weights.py wan2.2 da3            # train GEM-4D Wan-5B
+    python tools/download_weights.py wan2.1 da3            # train GEM-4D Wan-14B
     python tools/download_weights.py --dest /data/gem4d    # destination root (default <repo>/weights)
 """
 import argparse
@@ -20,6 +22,7 @@ FOLDERS = {  # name -> (HF dataset repo holding <name>/, description)
 }
 EXTERNAL = {  # name -> (HF model repo, local folder)
     "wan2.2": ("Wan-AI/Wan2.2-TI2V-5B-Diffusers", "Wan2.2-TI2V-5B-Diffusers"),
+    "wan2.1": ("Wan-AI/Wan2.1-I2V-14B-480P", "Wan2.1-I2V-14B-480P"),
 }
 DEFAULT_DEST = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "weights")
 

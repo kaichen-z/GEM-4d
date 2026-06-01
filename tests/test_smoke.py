@@ -17,6 +17,8 @@ sys.path[:0] = [str(ROOT / "model"), str(ROOT)]
 from gem4d import GEM4D                                          # noqa: E402
 from gem4d.models.backbone import Condition                      # noqa: E402
 from gem4d.models.wan5b import Wan5BBackbone                     # noqa: E402
+from gem4d.models.wan14b import Wan14BBackbone, Wan14BPipeline   # noqa: E402
+from gem4d.models.wan21 import FlowMatching, WanDiT              # noqa: E402
 
 torch.manual_seed(0)
 B, F, H, W = 1, 13, 8, 12            # latent grid (F'=13 <-> 49 frames)
@@ -30,6 +32,19 @@ def tiny_wan5b():
         text_dim=32, freq_dim=32, ffn_dim=64, num_layers=4, rope_max_seq_len=64)
     bb.flow_shift = 5.0
     bb.latent_channels, bb.spatial_patch, bb.num_heads, bb.hidden_dim = 48, 2, 2, 32
+    bb.device, bb.dtype = torch.device("cpu"), torch.float32
+    return bb
+
+
+def tiny_dit():
+    return WanDiT(dim=32, num_heads=2, ffn_dim=64, num_layers=4, text_dim=32, freq_dim=32)
+
+
+def tiny_wan14b():
+    bb = Wan14BBackbone.__new__(Wan14BBackbone)
+    bb.transformer = tiny_dit()
+    bb.flow, bb.flow_shift = FlowMatching(shift=3.0), 3.0
+    bb.latent_channels, bb.spatial_patch, bb.num_heads, bb.hidden_dim = 16, 2, 2, 32
     bb.device, bb.dtype = torch.device("cpu"), torch.float32
     return bb
 
@@ -99,6 +114,72 @@ def test_wan5b_t2v_mode():
     out = bb.forward(bb.transformer, x0, bb.sample_timesteps(B, "cpu"), Condition(x0[:, :1], False),
                      torch.randn(B, 8, 32))
     assert out.shape == x0.shape
+
+
+def test_wan14b_step():
+    print("wan14b", run_step(tiny_wan14b()))
+
+
+def test_wan14b_rgb_only_and_no_image():
+    bb = tiny_wan14b()
+    l_vid, l_geo = run_step(bb, geometry=False)
+    assert l_geo == 0.0
+    x0 = torch.randn(B, F, 16, H, W)
+    out = bb.forward(bb.transformer, x0, bb.sample_timesteps(B, "cpu"), Condition(x0[:, :1], False),
+                     torch.randn(B, 8, 32))
+    assert out.shape == x0.shape
+
+
+def test_wan14b_condition_channels():
+    dit = tiny_dit()
+    x = torch.randn(2, 16, F, H, W)
+    y = dit.build_condition(x, torch.ones(2, 16, 1, H, W))
+    assert y.shape == (2, 20, F, H, W)
+    assert (y[:, :4, 0] == 1).all() and (y[:, :4, 1:] == 0).all()      # mask: latent frame 0 only
+    assert (y[:, 4:, 0] == 1).all() and (y[:, 4:, 1:] == 0).all()      # condition latent, zero-padded
+
+
+def test_wan14b_flow_schedule():
+    from gem4d.models.wan21 import flow_step, sampling_timesteps
+    ts = sampling_timesteps(30, 3.0, "cpu")
+    assert len(ts) == 30 and int(ts[0]) == 999 and (ts[1:] < ts[:-1]).all()
+    fm = FlowMatching(shift=3.0)
+    grid = torch.linspace(1.0, 0.0, 1001, dtype=torch.float64)[:-1]
+    t = 3 * grid / (1 + 2 * grid) * 1000
+    assert abs(float(fm.weight(t).mean()) - 1.0) < 1e-4                  # normalised over the train grid
+    x0, eps = torch.randn(4, 3), torch.randn(4, 3)
+    t0 = torch.tensor(700.0)
+    x_t = (1 - 0.7) * x0 + 0.7 * eps
+    assert torch.allclose(flow_step(eps - x0, x_t, t0, 0), x0, atol=1e-5)  # exact velocity -> clean sample
+
+
+def test_wan14b_pipeline_loop():
+    from types import SimpleNamespace
+    from PIL import Image
+    bb = tiny_wan14b()
+    bb.encode_text = lambda prompts: torch.randn(len(prompts), 8, 32)
+    bb.clip = lambda frames: torch.randn(len(frames), 257, 1280)
+    bb.vae = SimpleNamespace(
+        encode=lambda videos, device: torch.randn(len(videos), 16, 1, 30, 52),
+        decode=lambda lat, device: torch.zeros(1, 3, 4 * (lat.shape[2] - 1) + 1, 240, 416))
+    pipe = Wan14BPipeline(bb, bb.transformer)
+    out = pipe(image=Image.new("RGB", (416, 240)), prompt="open the drawer", num_inference_steps=3,
+               generator=torch.Generator().manual_seed(0)).frames[0]
+    assert out.shape == (49, 240, 416, 3) and out.dtype == np.uint8
+
+
+def test_wan14b_checkpoint_roundtrip():
+    from gem4d.models.wan21.loader import build_dit
+    dit = tiny_dit().eval()
+    with tempfile.TemporaryDirectory() as d:
+        dit.save_pretrained(d, max_shard_size="200KB")                   # several shards + index
+        assert len(list(Path(d).glob("diffusion_pytorch_model-*.safetensors"))) > 1
+        back = build_dit(d, dtype=torch.float32).eval()
+    x, t, ctx = torch.randn(1, 16, F, H, W), torch.tensor([500.0]), torch.randn(1, 8, 32)
+    cl, clip = torch.randn(1, 16, 1, H, W), torch.randn(1, 257, 1280)
+    with torch.no_grad():
+        assert torch.equal(dit(x, t, ctx, clip_fea=clip, condition_latents=cl),
+                           back(x, t, ctx, clip_fea=clip, condition_latents=cl))
 
 
 def test_dataset_and_manifest():

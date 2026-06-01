@@ -4,6 +4,7 @@ from .models.gem4d import GEM4D
 
 BACKBONES = {
     "wan2.2-ti2v-5b": "gem4d.models.wan5b:Wan5BBackbone",      # GEM-4D Wan-5B
+    "wan2.1-i2v-14b": "gem4d.models.wan14b:Wan14BBackbone",    # GEM-4D Wan-14B
 }
 
 

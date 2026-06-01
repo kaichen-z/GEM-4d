@@ -1,0 +1,9 @@
+_base_: default.yaml
+# GEM-4D Wan-14B: Wan2.1-I2V-14B-480P with the 49-frame recipe (event-level clips, 416 x 240,
+# first frame + text conditioning, shift-3 flow matching), RGB-only full fine-tuning baseline (no geometry loss).
+experiment: {name: wan14b_rgb, output_dir: runs/wan14b_rgb}
+backbone: {name: wan2.1-i2v-14b, base_model: weights/Wan2.1-I2V-14B-480P}
+geometry: {enabled: false}
+data: {height: 240, width: 416, num_frames: 49, frame_sampling: event, lowercase_prompt: false, image_dropout: 0.0}
+optim: {lr: 5.0e-6}
+validation: {num_inference_steps: 30, guidance_scale: 4.0}

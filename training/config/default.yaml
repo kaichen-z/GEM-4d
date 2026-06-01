@@ -4,7 +4,7 @@ experiment:
   output_dir: runs/gem4d
 
 backbone:
-  name: wan2.2-ti2v-5b            # wan2.2-ti2v-5b (GEM-4D Wan-5B)
+  name: wan2.2-ti2v-5b            # wan2.2-ti2v-5b (GEM-4D Wan-5B) | wan2.1-i2v-14b (GEM-4D Wan-14B)
   base_model: weights/Wan2.2-TI2V-5B-Diffusers   # full model dir of the backbone (VAE, text encoder, DiT, ...)
   init_weights: null              # optional saved transformer to start from (checkpoint dir / step_N/transformer)
 

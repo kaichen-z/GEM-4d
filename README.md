@@ -54,22 +54,74 @@ pip install -r requirements.txt
 
 ```bash
 python tools/download_weights.py wan2.2 da3
+python tools/download_weights.py wan2.1 da3
 ```
 
 ### Data
 
-See [the example manifest](examples/train_manifest.json) for the video and instruction format.
+Training and manifest inference read a **manifest** (JSON / JSONL list); no dataset is predefined:
 
-## 1. Training GEM-4D Wan-5B
+```json
+[
+  {"video": "rlbench/close_drawer/ep_0001/front.mp4", "prompt": "close the middle drawer", "robot": "Franka robot arm"},
+  {"video": "droid/ep_0042.mp4", "prompt": "put the marker in the cup", "start": 35, "end": 212},
+  {"video": "my_lab/frames_0042", "prompt": "push the red block to the left"}
+]
+```
+
+| Field | Meaning |
+|---|---|
+| `video` | `.mp4` / `.webm`, or a folder of frames `0.png, 1.png, …` (an image also works for inference). Relative paths resolve against `data.data_root`, else the manifest's folder |
+| `prompt` | the instruction |
+| `robot` | optional embodiment text appended to the prompt; keep it identical at train and test time |
+| `start`, `end` | optional frame range `[start, end)` of one event inside a longer video |
+
+`[prompt, video]` / `[prompt, video, robot]` lists work too. Clips are center-cropped and resized to
+`data.height × data.width` and brought to 49 frames: `frame_sampling: uniform` (Wan-5B) subsamples long
+clips and pads short ones with the last frame; `frame_sampling: event` (Wan-14B) resamples each event to
+exactly 49 frames. Frame 0 is the condition. No depth files are needed: geometry comes from DA3 on the fly.
+
+## 1, 2. Training GEM-4D
 
 ```bash
 # 1. GEM-4D Wan-5B (8 GPUs)
 bash training_bash/train.sh training/config/wan5b_gem4d.yaml \
     data.train_manifest=/data/train.json data.val_manifest=/data/val.json
+
+# 2. GEM-4D Wan-14B (8 GPUs with >= 141 GB; on 8 x 80 GB keep the optimizer in CPU memory)
+bash training_bash/train.sh training/config/wan14b_gem4d.yaml \
+    data.train_manifest=/data/events.json data.val_manifest=/data/val.json \
+    train.accelerate_config=training/config/accelerate_zero2_offload.yaml
 ```
+
+| Path | Backbone | Latent | Clips | Objective |
+|---|---|---|---|---|
+| Wan-5B | [Wan2.2-TI2V-5B](https://huggingface.co/Wan-AI/Wan2.2-TI2V-5B-Diffusers), 30 blocks (diffusers) | 48 × F/4 × H/16 × W/16 | 49 × 480 × 640, uniform | TI2V first-frame conditioning, shift-5 rectified flow |
+| Wan-14B | [Wan2.1-I2V-14B-480P](https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-480P), 40 blocks (original Wan2.1 layout) | 16 × F/4 × H/8 × W/8 | 49 × 240 × 416, event | CLIP + latent first-frame conditioning, shift-3 flow matching |
+
+Main settings (any key of `training/config/default.yaml` can be overridden as `key.sub=value`):
+
+| Key | Wan-5B | Wan-14B | Meaning |
+|---|---|---|---|
+| `geometry.alpha` | 0.03 | 0.03 | weight α of L_geo (linear ramp over `geometry.warmup` = 100 steps) |
+| `geometry.mask_ratio` | 0.5 | 0.5 | fraction of geometry tokens masked |
+| `geometry.hook_layer` | 15 | 20 | block whose output `m_t` feeds the Geometry DiT |
+| `geometry.depth` | 4 | 4 | Geometry DiT blocks |
+| `optim.lr` | 1e-5 | 5e-6 | constant after 100 warm-up steps, AdamW (0.9, 0.95), wd 1e-3 |
+| `train.max_steps` | 10000 | 10000 | batch 1 per GPU, bf16, gradient checkpointing |
+
+`*_rgb.yaml` are the RGB-only full fine-tuning baselines (`geometry.enabled: false`).
+`backbone.init_weights=<step_N>` continues from an export (plus `geometry.init_geometry=<step_N>/geometry.safetensors`).
+
+**Outputs** (`experiment.output_dir`): `checkpoints/step_N/transformer/` (the video DiT: diffusers format
+for Wan-5B, original Wan2.1 layout for Wan-14B), `checkpoints/step_N/geometry.safetensors` (Geometry DiT,
+training only), `checkpoints/state/` (resumable state), `vis/step_N/*.mp4` (validation, GT | prediction),
+`logs/` (TensorBoard). **Resume:** re-run the same command.
 
 ## License and attribution
 
+- `model/gem4d/models/wan21/`: Wan2.1 and DiffSynth-Studio components (Apache-2.0, MIT packaging);
+  see `NOTICE.md` and the license files there.
 - `model/dependency/depth_anything_3/`: Depth Anything 3 (`LICENSE_depth_anything_3`).
 - Weights keep their own terms: Wan2.1 / Wan2.2 (Apache-2.0), DA3 (model card).
 

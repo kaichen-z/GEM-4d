@@ -2,6 +2,8 @@
 # GEM-4D training launcher (single node, accelerate + DeepSpeed ZeRO-2).
 #
 #   bash training_bash/train.sh training/config/wan5b_gem4d.yaml data.train_manifest=/data/train.json
+#   bash training_bash/train.sh training/config/wan14b_gem4d.yaml \
+#        data.train_manifest=/data/events.json data.val_manifest=/data/val.json train.max_steps=20000
 #
 # Any config key can be overridden as key.sub=value. Re-running with the same experiment.output_dir
 # resumes from <output_dir>/checkpoints/state automatically.
