@@ -233,6 +233,14 @@ def test_checkpoint_prune():
 
 
 
+def test_robot_composite():
+    from gem4d.utils.video_io import robot_composite
+    img = np.full((480, 800, 3), 200, np.uint8)
+    out = robot_composite(img)
+    assert out.shape == (240, 416, 3)
+    assert out[:, :295].min() > 190 and out[:, 310:].max() < 10            # main view left, black right
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

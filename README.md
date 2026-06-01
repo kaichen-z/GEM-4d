@@ -118,6 +118,36 @@ for Wan-5B, original Wan2.1 layout for Wan-14B), `checkpoints/step_N/geometry.sa
 training only), `checkpoints/state/` (resumable state), `vis/step_N/*.mp4` (validation, GT | prediction),
 `logs/` (TensorBoard). **Resume:** re-run the same command.
 
+## 3. Inference with GEM-4D-Wan14B
+
+```bash
+# one photo + instruction (--compose: photo -> the 416 x 240 robot composite the model was trained on)
+bash training_bash/infer.sh --backbone wan2.1-i2v-14b --base_model weights/Wan2.1-I2V-14B-480P \
+    --weights runs/wan14b_gem4d/checkpoints/step_010000 --image photo.jpg --compose --output_dir outputs/wan14b \
+    --prompt "The white Franka robot arm performs the task: close the drawer. This is a composed robot video with the main third-person view on the left."
+
+# every entry of a manifest, with [GT | prediction] videos
+bash training_bash/infer.sh --backbone wan2.1-i2v-14b --base_model weights/Wan2.1-I2V-14B-480P \
+    --weights runs/wan14b_gem4d/checkpoints/step_010000 --manifest examples/val_manifest.json --output_dir outputs/wan14b --side_by_side
+```
+
+`--weights` also takes any training export (`runs/<exp>/checkpoints/step_N`; for Wan-5B use
+`--backbone wan2.2-ti2v-5b --base_model weights/Wan2.2-TI2V-5B-Diffusers`). Output: `<idx>_<clip>.mp4`
+(49 frames), `<idx>_<clip>_gt_pred.mp4` with `--side_by_side`, `_<k>` suffixes with `--num_samples k`.
+
+| Backbone | Steps | CFG | Size | fps | Seed | GPU memory |
+|---|---|---|---|---|---|---|
+| `wan2.1-i2v-14b` | 30 | 4.0 | 240 × 416 | 8 | 3402 | ~48 GB (shift 3, empty negative prompt) |
+| `wan2.2-ti2v-5b` | 50 | 5.0 | 480 × 640 | 16 | 42 | `--cpu_offload` below 40 GB |
+
+Override with `--steps`, `--guidance_scale`, `--shift`, `--height`, `--width`, `--fps`, `--seed`.
+
+**Prompts.** Use the format GEM-4D-Wan14B was trained on:
+`The <robot> performs the task: <instruction>. This is a composed robot video with the main third-person view on the left.`
+with `<robot>` = white Franka robot arm (RLBench), Franka robot arm (DROID), black WidowX robot arm (Bridge),
+Google mobile manipulator robot arm (RT-1). Training videos are 416 × 240 composites with the 4:3 main
+view on the left (`x < 302`) and black on the right; `--compose` puts a plain photo into that layout.
+
 ## License and attribution
 
 - `model/gem4d/models/wan21/`: Wan2.1 and DiffSynth-Studio components (Apache-2.0, MIT packaging);
