@@ -1,0 +1,19 @@
+# accelerate + DeepSpeed ZeRO-2, single node. training_bash/train.sh overrides num_processes,
+# gradient_accumulation_steps and gradient_clipping from the experiment config.
+compute_environment: LOCAL_MACHINE
+distributed_type: DEEPSPEED
+deepspeed_config:
+  zero_stage: 2
+  gradient_accumulation_steps: 1
+  gradient_clipping: 1.0
+  offload_optimizer_device: none
+  offload_param_device: none
+  zero3_init_flag: false
+mixed_precision: bf16
+num_machines: 1
+num_processes: 8
+machine_rank: 0
+main_training_function: main
+rdzv_backend: static
+same_network: true
+use_cpu: false

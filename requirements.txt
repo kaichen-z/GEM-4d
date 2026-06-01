@@ -1,0 +1,29 @@
+# GEM-4D — Python 3.10, CUDA 12
+torch>=2.4
+torchvision
+diffusers>=0.35.0          # Wan2.2-TI2V support
+transformers>=4.46
+accelerate>=1.0
+deepspeed>=0.15
+safetensors
+sentencepiece
+einops
+pyyaml
+numpy<2
+opencv-python
+decord
+Pillow
+imageio
+imageio-ffmpeg
+huggingface_hub
+tensorboard
+ftfy                        # Wan prompt cleaning
+tqdm
+# DepthAnything-3 (model/dependency/depth_anything_3)
+# xformers                  # optional (DA3 fused SwiGLU); only if built for your torch + triton -- a mismatched build breaks diffusers imports
+omegaconf
+addict
+trimesh
+plyfile
+evo
+moviepy==1.0.3

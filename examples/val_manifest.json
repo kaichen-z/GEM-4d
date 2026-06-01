@@ -1,0 +1,4 @@
+[
+  {"video": "rlbench/pick_up_cup/ep_0003/front.mp4", "prompt": "lift the maroon cup", "robot": "Franka robot arm"},
+  {"video": "my_lab/first_frames/scene_01.png", "prompt": "open the drawer", "robot": "Franka robot arm"}
+]

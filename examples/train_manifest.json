@@ -1,0 +1,6 @@
+[
+  {"video": "rlbench/close_drawer/ep_0001/front.mp4", "prompt": "close the middle drawer", "robot": "Franka robot arm"},
+  {"video": "bridge/0007/rgb.mp4", "prompt": "put the fork inside the silver pan", "robot": "Trossen WidowX 250 robot arm"},
+  {"video": "my_lab/frames_0042", "prompt": "push the red block to the left"},
+  ["pick orange from white bowl", "rt1/record_00162/49/rgb.mp4", "google robot"]
+]
