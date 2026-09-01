@@ -55,6 +55,7 @@ pip install -r requirements.txt
 ```bash
 python tools/download_weights.py wan2.2 da3
 python tools/download_weights.py wan2.1 da3
+python tools/download_weights.py wan2.1 gem-4d-wan14b
 ```
 
 ### Data
@@ -123,12 +124,12 @@ training only), `checkpoints/state/` (resumable state), `vis/step_N/*.mp4` (vali
 ```bash
 # one photo + instruction (--compose: photo -> the 416 x 240 robot composite the model was trained on)
 bash training_bash/infer.sh --backbone wan2.1-i2v-14b --base_model weights/Wan2.1-I2V-14B-480P \
-    --weights runs/wan14b_gem4d/checkpoints/step_010000 --image photo.jpg --compose --output_dir outputs/wan14b \
+    --weights weights/gem-4d-wan14b --image photo.jpg --compose --output_dir outputs/wan14b \
     --prompt "The white Franka robot arm performs the task: close the drawer. This is a composed robot video with the main third-person view on the left."
 
 # every entry of a manifest, with [GT | prediction] videos
 bash training_bash/infer.sh --backbone wan2.1-i2v-14b --base_model weights/Wan2.1-I2V-14B-480P \
-    --weights runs/wan14b_gem4d/checkpoints/step_010000 --manifest examples/val_manifest.json --output_dir outputs/wan14b --side_by_side
+    --weights weights/gem-4d-wan14b --manifest examples/val_manifest.json --output_dir outputs/wan14b --side_by_side
 ```
 
 `--weights` also takes any training export (`runs/<exp>/checkpoints/step_N`; for Wan-5B use
@@ -147,6 +148,27 @@ Override with `--steps`, `--guidance_scale`, `--shift`, `--height`, `--width`, `
 with `<robot>` = white Franka robot arm (RLBench), Franka robot arm (DROID), black WidowX robot arm (Bridge),
 Google mobile manipulator robot arm (RT-1). Training videos are 416 × 240 composites with the 4:3 main
 view on the left (`x < 302`) and black on the right; `--compose` puts a plain photo into that layout.
+
+## 4. GEM-4D-Wan14B checkpoint
+
+**GEM-4D-Wan14B** is the released Wan-14B video model of GEM-4D: a Wan2.1-I2V-14B DiT for image +
+instruction → 49-frame robot video (240 × 416), trained on RLBench / Bridge / RT-1 / DROID
+(0.40 / 0.25 / 0.25 / 0.10). It has the layout of a [Wan-14B training export](#1-2-training-gem-4d)
+(`runs/wan14b_gem4d/checkpoints/step_N/`) and loads the same way:
+
+```
+gem-4d-wan14b/
+  transformer/config.json
+  transformer/diffusion_pytorch_model-0000k-of-0000n.safetensors   bf16, original Wan2.1 parameter names
+  transformer/diffusion_pytorch_model.safetensors.index.json
+```
+
+| | |
+|---|---|
+| Base | [Wan2.1-I2V-14B-480P](https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-480P) (Apache-2.0) |
+| Download | `python tools/download_weights.py wan2.1 gem-4d-wan14b` ([`kaichen-z/Gem-4D`](https://huggingface.co/datasets/kaichen-z/Gem-4D)) |
+| Inference | `--base_model weights/Wan2.1-I2V-14B-480P --weights weights/gem-4d-wan14b` (VAE, CLIP, umT5 and tokenizer come from the base folder) |
+| Further training | `backbone.init_weights=weights/gem-4d-wan14b` with `wan14b_gem4d.yaml` / `wan14b_rgb.yaml` |
 
 ## License and attribution
 

@@ -2,13 +2,13 @@
 
     # one image + prompt
     python inference/infer.py --backbone wan2.1-i2v-14b --base_model weights/Wan2.1-I2V-14B-480P \
-        --weights runs/wan14b_gem4d/checkpoints/step_010000 --image examples/first_frame.png --prompt "open the drawer" \
+        --weights weights/gem-4d-wan14b --image examples/first_frame.png --prompt "open the drawer" \
         --output_dir outputs/demo
     # a manifest of clips / images
     python inference/infer.py --backbone wan2.2-ti2v-5b --base_model weights/Wan2.2-TI2V-5B-Diffusers \
         --weights runs/wan5b_gem4d/checkpoints/step_010000 --manifest examples/val_manifest.json --output_dir outputs/demo
 
---weights: a training export (runs/x/checkpoints/step_NNNNNN), or
+--weights: a training export (runs/x/checkpoints/step_NNNNNN), the GEM-4D-Wan14B checkpoint, or
            omitted (= the base model). Writes <idx>_<clip>.mp4 and, with --side_by_side, <idx>_<clip>_gt_pred.mp4.
 --compose: a plain photo / single-view video -> the robot composite (main view left, x < 302 of 416).
 Unset sampling options take the backbone's defaults (DEFAULTS below).
