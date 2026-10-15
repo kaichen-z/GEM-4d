@@ -128,7 +128,7 @@ class DiagSSM(nn.Module):
 
 
 class GeoDiT(nn.Module):
-    def __init__(self, dim, heads=24, depth=4, in_ch=16, patch=2):
+    def __init__(self, dim, heads=24, depth=4, in_ch=16, patch=2, use_eps_hat=None):
         super().__init__()
         self.dim = dim; self.patch = patch; self.in_ch = in_ch
         pc = in_ch * patch * patch
@@ -138,7 +138,8 @@ class GeoDiT(nn.Module):
         # backbone's intermediate features. With coupled noise this input lets the Geo-DiT "echo" the
         # noise term of its velocity target instead of reading geometry from the backbone.
         # The released checkpoints (checkpoint-1 / checkpoint-2) were trained with GEO_EPS_HAT=1.
-        self.use_eps_hat = os.environ.get("GEO_EPS_HAT", "0") == "1"
+        # use_eps_hat (ctor) overrides the env var, e.g. to rebuild a GeoDiT that was trained with it.
+        self.use_eps_hat = (os.environ.get("GEO_EPS_HAT", "0") == "1") if use_eps_hat is None else bool(use_eps_hat)
         self.eps_embed   = nn.Linear(pc, dim) if self.use_eps_hat else None
         self.null_token  = nn.Parameter(torch.zeros(1, 1, dim))   # empty-mode learned null
         self.present_emb = nn.Parameter(torch.zeros(1, 1, dim))
