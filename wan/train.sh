@@ -52,6 +52,7 @@ if [[ "${GEO}" == "1" ]]; then
   export GEO_HOOK_LAYER="${GEO_HOOK_LAYER:-15}"     # 30 Wan blocks -> midpoint
   export GEO_WARMUP="${GEO_WARMUP:-100}"
   export GEO_COUPLED_NOISE="${GEO_COUPLED_NOISE:-1}"
+  export GEO_EPS_HAT="${GEO_EPS_HAT:-0}"            # 1 = also feed stop-grad RGB noise estimate to Geo-DiT
   export GEO_DIM="${GEO_DIM:-1536}" GEO_HEADS="${GEO_HEADS:-12}" GEO_DEPTH="${GEO_DEPTH:-4}"
   VISION_ARG="--pretrained_vision_model_path=${GEO_DA3_CKPT}"
 else

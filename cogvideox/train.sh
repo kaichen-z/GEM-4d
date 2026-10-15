@@ -62,6 +62,8 @@ if [[ "${GEO}" == "1" ]]; then
   export GEO_WARMUP="${GEO_WARMUP:-100}"            # linear ramp of LAMBDA_GEO
   export GEO_COUPLED_NOISE="${GEO_COUPLED_NOISE:-1}" # geometry latent shares the RGB noise
   export GEO_X0="${GEO_X0:-0}"                      # 1 = Geo-DiT predicts z0 instead of velocity
+  export GEO_EPS_HAT="${GEO_EPS_HAT:-0}"            # 1 = also feed stop-grad eps_rgb_hat to Geo-DiT
+                                                    #     (only to reproduce released checkpoints)
 else
   export RGB_ONLY=1; unset REF15 REF13 2>/dev/null || true
 fi

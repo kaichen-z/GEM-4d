@@ -133,7 +133,13 @@ class GeoDiT(nn.Module):
         self.dim = dim; self.patch = patch; self.in_ch = in_ch
         pc = in_ch * patch * patch
         self.geo_embed   = nn.Linear(pc, dim)     # present-mode: patch-embed z_t_geo
-        self.eps_embed   = nn.Linear(pc, dim)     # eps_rgb_hat conditioning (added to tokens)
+        # Optional extra input: stop-grad RGB noise estimate eps_rgb_hat = sigma*z_t + alpha*v_rgb.
+        # OFF by default (GEO_EPS_HAT=0) — the paper's Geometry DiT is conditioned only on the video
+        # backbone's intermediate features. With coupled noise this input lets the Geo-DiT "echo" the
+        # noise term of its velocity target instead of reading geometry from the backbone.
+        # The released checkpoints (checkpoint-1 / checkpoint-2) were trained with GEO_EPS_HAT=1.
+        self.use_eps_hat = os.environ.get("GEO_EPS_HAT", "0") == "1"
+        self.eps_embed   = nn.Linear(pc, dim) if self.use_eps_hat else None
         self.null_token  = nn.Parameter(torch.zeros(1, 1, dim))   # empty-mode learned null
         self.present_emb = nn.Parameter(torch.zeros(1, 1, dim))
         self.empty_emb   = nn.Parameter(torch.zeros(1, 1, dim))
@@ -193,7 +199,7 @@ class GeoDiT(nn.Module):
             tok = tok + self.masked_emb
         else:
             tok = self.null_token.expand(B, N, -1) + self.empty_emb
-        if eps_rgb_hat is not None:
+        if self.use_eps_hat and eps_rgb_hat is not None:
             tok = tok + self.eps_embed(self._patchify(eps_rgb_hat).to(wd))
         temb = self.temb_mlp(timestep_embedding(t, self.dim).to(wd))
         iters = self.geo_iters if self.variant == "iter" else 1

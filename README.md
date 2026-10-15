@@ -207,6 +207,15 @@ On an LSF cluster, export the same variables and submit
   | `GEO_DEPTH` | 4 | number of Geo-DiT blocks |
   | `GEO_COUPLED_NOISE` | 1 | geometry latent is noised with the same ε as RGB |
   | `GEO_X0` | 0 | 1 = Geo-DiT regresses z₀ instead of the velocity |
+  | `GEO_EPS_HAT` | 0 | 1 = also feed the Geo-DiT a stop-grad RGB noise estimate ε̂ = σ·z_t + α·v̂ (see note) |
+
+  > **Note on `GEO_EPS_HAT`.** As in the paper, the Geometry DiT is conditioned only on the video
+  > backbone's intermediate features (plus the masked, noised geometry latent and the timestep).
+  > The released `checkpoint-1` / `checkpoint-2` were trained with an additional input,
+  > the RGB branch's noise estimate ε̂ (`GEO_EPS_HAT=1`). Because geometry and RGB share the same
+  > noise, ε̂ lets the Geo-DiT reproduce the noise part of its velocity target without reading
+  > geometry from the backbone, so it is off by default. Inference is unaffected: the Geo-DiT is
+  > dropped, and both checkpoints work as released. Set `GEO_EPS_HAT=1` only to reproduce them.
 
 - **Schedule.** `LEARNING_RATE` 1e-5, `LR_SCHEDULER` constant_with_warmup, batch 1 per GPU,
   49 × 480 × 640, bf16.
@@ -232,7 +241,7 @@ bash wan/train.sh
 ```
 
 - **Geometry branch.** A hook on block `GEO_HOOK_LAYER` (15 of 30) feeds the Geo-DiT
-  (`GEO_DIM` 1536, `GEO_HEADS` 12, `GEO_DEPTH` 4). DA3 depth is computed per clip, encoded by the
+  (`GEO_DIM` 1536, `GEO_HEADS` 12, `GEO_DEPTH` 4; `GEO_EPS_HAT` 0 as above). DA3 depth is computed per clip, encoded by the
   Wan VAE into a 16-ch latent and noised with the RGB noise; `MASK_RATIO` (0.7) of the tokens are
   masked and `loss += LAMBDA_GEO (0.5) · ramp · mse`.
 - **Starting point.** Optional `INIT_TRANSFORMER=<OUT>/checkpoint-N/transformer/diffusion_pytorch_model.safetensors`
