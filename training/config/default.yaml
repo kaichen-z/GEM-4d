@@ -1,0 +1,71 @@
+# Shared defaults. Backbone configs inherit this file via `_base_: default.yaml`.
+experiment:
+  name: gem4d
+  output_dir: runs/gem4d
+
+backbone:
+  name: cogvideox                 # cogvideox | wan2.2-ti2v-5b
+  base_model: weights/cogvideox   # full diffusers model dir (VAE, text encoder, scheduler, transformer)
+  init_weights: null              # optional saved transformer to start from (checkpoint dir / step_N/transformer)
+
+geometry:                         # GEM-4D geometry branch (paper Sec. 3.2); enabled: false = RGB-only fine-tuning
+  enabled: true
+  teacher: weights/da3            # DepthAnything-3 (local dir or depth-anything/DA3-LARGE-1.1)
+  feat_layer: 12                  # DA3 ViT-L layer used as the geometry representation g0
+  hook_layer: null                # backbone block whose output m_t feeds the Geometry DiT (null = middle)
+  depth: 4                        # Geometry DiT blocks
+  mask_ratio: 0.5                 # fraction of geometry tokens masked (mask mechanism M)
+  alpha: 0.03                     # weight of L_geo
+  warmup: 100                     # linear ramp of alpha over the first steps
+  coupled_noise: true             # geometry and video share one noise sample
+  x0_target: false                # predict g0 instead of the geometry velocity
+  scale: 1.0                      # scale of the projected geometry latent
+  use_eps_hat: false              # only to reproduce the released CogVideoX checkpoints
+  init_geometry: null             # optional geometry.safetensors (Geo-DiT + projector) to start from
+
+data:
+  train_manifest: ???             # see training/data/manifest.py
+  val_manifest: null
+  data_root: null                 # base for relative paths (default: the manifest's folder)
+  num_frames: 49                  # 4k+1
+  height: 480
+  width: 640
+  min_frames: 1                   # drop clips shorter than this (shorter ones are padded with the last frame)
+  caption_dropout: 0.05
+  image_dropout: 0.05             # probability of dropping the first-frame condition
+  num_workers: 8
+
+optim:
+  lr: 1.0e-5
+  betas: [0.9, 0.95]
+  weight_decay: 1.0e-3
+  eps: 1.0e-8
+  scheduler: constant_with_warmup
+  warmup_steps: 100
+  max_grad_norm: 1.0              # applied by DeepSpeed (training/config/accelerate_zero2.yaml)
+  grad_accum: 1
+
+train:
+  max_steps: 10000
+  batch_size: 1                   # per GPU
+  seed: 42
+  mixed_precision: bf16
+  gradient_checkpointing: true
+
+checkpoint:
+  every: 500
+  keep_last: 3                    # newest exported checkpoints kept ...
+  keep_every: 2000                # ... plus every multiple of this step
+  save_state: true                # full resumable state (weights + optimizer), newest only
+
+validation:
+  every: 500
+  loss_batches: 8
+  num_videos: 2
+  num_inference_steps: 50
+  guidance_scale: 6.0
+  fps: 8
+
+logging:
+  report_to: tensorboard
+  log_every: 10

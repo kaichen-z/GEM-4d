@@ -1,0 +1,4 @@
+_base_: default.yaml
+experiment: {name: cogvideox_gem4d, output_dir: runs/cogvideox_gem4d}
+backbone: {name: cogvideox, base_model: weights/cogvideox}
+geometry: {enabled: true, alpha: 0.03, mask_ratio: 0.5, hook_layer: 21}

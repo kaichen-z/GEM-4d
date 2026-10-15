@@ -1,0 +1,4 @@
+_base_: default.yaml
+experiment: {name: cogvideox_rgb, output_dir: runs/cogvideox_rgb}
+backbone: {name: cogvideox, base_model: weights/cogvideox}
+geometry: {enabled: false}

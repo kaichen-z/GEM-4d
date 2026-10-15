@@ -1,0 +1,5 @@
+_base_: default.yaml
+experiment: {name: wan22_ti2v_rgb, output_dir: runs/wan22_ti2v_rgb}
+backbone: {name: wan2.2-ti2v-5b, base_model: weights/Wan2.2-TI2V-5B-Diffusers}
+geometry: {enabled: false}
+validation: {guidance_scale: 5.0}
