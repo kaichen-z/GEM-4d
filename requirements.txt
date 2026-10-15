@@ -1,0 +1,41 @@
+# GEM-4D — tested with Python 3.10, CUDA 12
+# ---- CogVideoX backbone (cogvideox/) ----
+torch>=2.1
+torchvision
+diffusers>=0.30.1
+transformers>=4.46.2
+accelerate>=0.33
+deepspeed
+sentencepiece
+einops
+numpy<2
+opencv-python
+pandas
+decord
+Pillow
+tqdm
+wandb
+matplotlib
+imageio
+imageio-ffmpeg
+huggingface_hub
+safetensors
+# ---- DepthAnything-3 geometry teacher (depth/src) ----
+xformers
+trimesh
+omegaconf
+addict
+evo
+moviepy==1.0.3
+plyfile
+# ---- Wan backbone (wan/, VideoX-Fun) ----
+timm
+tomesd
+torchdiffeq
+torchsde
+scikit-image
+albumentations
+imageio[pyav]
+tensorboard
+ftfy
+func_timeout
