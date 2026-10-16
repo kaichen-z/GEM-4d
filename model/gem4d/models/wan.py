@@ -13,8 +13,11 @@ import torch
 from diffusers import AutoencoderKLWan, UniPCMultistepScheduler, WanTransformer3DModel
 from transformers import AutoTokenizer, UMT5EncoderModel
 
+from ..utils.compat import patch_sdpa_enable_gqa
 from .backbone import Condition, VideoBackbone
 from .cogvideox import load_transformer_weights
+
+patch_sdpa_enable_gqa()
 
 
 class WanTI2VBackbone(VideoBackbone):
