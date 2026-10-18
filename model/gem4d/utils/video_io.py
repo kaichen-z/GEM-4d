@@ -55,4 +55,5 @@ def to_uint8(frames) -> List[np.ndarray]:
 def save_mp4(frames, path: str, fps: int = 8):
     from diffusers.utils import export_to_video
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    export_to_video([np.asarray(f) for f in to_uint8(frames)], path, fps=fps)
+    # export_to_video expects float frames in [0, 1] (it multiplies numpy frames by 255 itself)
+    export_to_video([f.astype(np.float32) / 255.0 for f in to_uint8(frames)], path, fps=fps)

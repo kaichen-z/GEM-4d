@@ -144,6 +144,16 @@ def test_dataset_and_manifest():
         assert -1.0 <= b["video"].min() and b["video"].max() <= 1.0
 
 
+def test_save_mp4_colors():
+    import imageio.v3 as iio
+    from gem4d.utils.video_io import save_mp4
+    with tempfile.TemporaryDirectory() as d:
+        f = np.zeros((16, 32, 32, 3), np.uint8); f[..., 0] = 200; f[..., 2] = 30
+        save_mp4(list(f), os.path.join(d, "a.mp4"), fps=8)
+        back = iio.imread(os.path.join(d, "a.mp4"), plugin="pyav")
+        assert abs(int(back[..., 0].mean()) - 200) < 15 and abs(int(back[..., 2].mean()) - 30) < 15
+
+
 def test_checkpoint_prune():
     from training.train_utils.checkpoint import list_steps, prune
     with tempfile.TemporaryDirectory() as d:
