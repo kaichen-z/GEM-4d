@@ -1,6 +1,12 @@
 <div align="center">
 
+  <p><i>Geometry-grounded video world models for robot manipulation</i></p>
+
   <h1>GEM-4D: Geometry-Enhanced Video World Models<br/>for Robot Manipulation</h1>
+
+  <p><b>One mid-layer feature. One frozen geometry teacher. Zero extra cost at inference.</b></p>
+
+  <p>A Geometry DiT that sees the scene only through the video DiT's features turns 4D geometry<br/>into a training signal for the video backbone, then is thrown away.</p>
 
   <p>
     <b>Kaichen Zhou</b><sup>1,2,*</sup> &nbsp;
@@ -35,15 +41,41 @@
 
 </div>
 
+<p align="center">
+  <a href="#abstract">Abstract</a> ·
+  <a href="#method">Method</a> ·
+  <a href="#results">Results</a> ·
+  <a href="#paper--code">Paper ↔ code</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#citation">Citation</a>
+</p>
+
 ![GEM-4D vs. TesserAct: from one observation and an instruction, GEM-4D generates a rollout whose geometry stays consistent enough to act on.](assets/teaser.jpg)
 
-GEM-4D is an image + text → video world model for robot manipulation. During training, a
-**Geometry DiT** reads the intermediate features of the video DiT and predicts the flow of a
-**masked geometry latent** derived from a frozen geometry foundation model (DepthAnything-3).
-Because most geometry tokens are masked and the Geometry DiT sees the scene only through the
-video features, minimising its loss pushes 3D correspondence structure into the video backbone.
-The branch is **dropped at inference**: the deployed model is an ordinary image-to-video generator
-with zero extra cost.
+## Abstract
+
+Video world models can generate realistic futures from a single instruction, but they often fail to
+track the same physical points consistently across time. The generated videos look plausible, yet
+lack the physical grounding needed for reliable action execution such as robot manipulation.
+
+**GEM-4D** injects dense 4D correspondence supervision, distilled from a pretrained geometry
+foundation model, into the video generative backbone during training. The world model learns
+appearance and geometric structure jointly while keeping a single-stream architecture with no
+additional inference cost. GEM-4D achieves state-of-the-art video prediction and geometric
+consistency in simulated and real-world scenarios, and improves real-world manipulation success
+from **61% to 81%**.
+
+**Keywords:** video world models, 4D generation, geometry foundation models, robot manipulation.
+
+## Method
+
+### One shared feature, two flows.
+
+A video DiT predicts the velocity of the noised video latent. The output `m_t` of one of its middle
+blocks is handed to a small **Geometry DiT**, which predicts the velocity of a **masked, noised
+geometry latent** built from a frozen geometry foundation model (Depth Anything 3). The Geometry DiT
+has no access to pixels, depth or cameras: everything it knows about the scene arrives through
+`m_t`.
 
 ```
 first frame + instruction ──► video DiT ──────────────────────────► video velocity ──► L_vid
@@ -52,17 +84,62 @@ first frame + instruction ──► video DiT ───────────�
  masked, noised geometry latent ──► Geometry DiT ──► geometry velocity ──► L_geo
  g0 = projector(DA3 features)   (same noise as the video latent)
 
-                        L = L_vid + alpha · L_geo
+                        L = L_vid + α · L_geo
 ```
 
-The same implementation runs on two backbones:
+### Training: distil geometry into the video backbone
 
-| Backbone | Config | Latent | Status |
+`L_geo` can only be minimised if `m_t` encodes depth, camera motion and scene flow, the factors that
+determine inter-frame correspondence. Its gradient `α · ∂L_geo/∂m_t · ∂m_t/∂θ` flows back into the
+video backbone and pushes that structure into its representation. The geometry teacher stays frozen.
+
+### Inference: drop the branch
+
+The Geometry DiT only reads from `m_t` and never writes back, so it is removed after training. The
+deployed model is a plain image-to-video generator, the same size and speed as its backbone.
+
+## Results
+
+4D scene generation (paper Tab. 1). R = real (DROID), S = simulated (RLBench).
+
+| D | Method | FVD ↓ | SSIM ↑ | PSNR ↑ | AbsRel ↓ | δ1 ↑ | Chamfer ↓ | Tracking ↑ |
+|---|---|---|---|---|---|---|---|---|
+| R | CogVideoX | 35.56 | 75.91 | 20.18 | 22.33 | 68.32 | 0.2670 | 66.22 |
+| R | Wan 2.2-14B | 33.43 | 76.24 | 20.70 | 21.39 | 71.18 | 0.2349 | 68.18 |
+| R | TesserAct | 33.28 | 75.66 | 20.08 | 22.07 | 66.80 | 0.2630 | 67.14 |
+| R | **GEM-4D** | **31.82** | **82.05** | **21.11** | **20.13** | **78.19** | **0.2001** | **71.23** |
+| S | CogVideoX | 40.21 | 75.51 | 20.03 | 15.41 | 70.99 | 0.2913 | 58.32 |
+| S | Wan 2.2-14B | 49.20 | 73.01 | 19.87 | 17.81 | 67.07 | 0.1762 | 61.99 |
+| S | TesserAct | 41.97 | 76.72 | 19.71 | 16.02 | 69.26 | 0.1813 | 61.15 |
+| S | **GEM-4D** | **27.94** | **80.27** | **23.36** | **14.11** | **74.13** | **0.0702** | **68.18** |
+
+More videos and real-robot rollouts: [gem-4d.github.io](https://gem-4d.github.io/).
+
+## Paper ↔ code
+
+| Paper (Sec. 3.2) | Code |
+|---|---|
+| Video DiT `E_θ`, `U_θ`; mid-level feature `m_t` | `model/gem4d/models/{cogvideox,wan}.py`; forward hook on block `geometry.hook_layer` (21/42 CogVideoX, 15/30 Wan), not detached (`models/gem4d.py`) |
+| Frozen geometry model `G`, representation `g_0` | `geometry/teacher.py`: DA3 ViT-L layer 12 → frozen projector to the latent grid |
+| Mask mechanism `M` on the noised geometry | `heads/geo_dit.py`: `geometry.mask_ratio` of tokens replaced by a learned mask token |
+| `v_ψ^geo(M(g_t), t, m_t)`, `m_t` the only scene input | `GeoDiT`: cross-attention to `m_t` only (`geometry.use_eps_hat=false`) |
+| `L = L_vid + α L_geo` | `models/gem4d.py` + `training/trainer.py` (`geometry.alpha`, linear ramp `geometry.warmup`) |
+| Geometry branch dropped at inference | `inference/infer.py` loads only the exported transformer |
+
+Not in this repository: the adaptive inverse-dynamics module (video → robot actions) and the
+VGGT / depth-target ablations. In the paper Wan 2.2-14B is a fine-tuned **baseline**; GEM-4D on
+Wan2.2-TI2V-5B is provided here as an additional backbone without released weights.
+
+## Quick start
+
+The same code trains GEM-4D on two backbones:
+
+| Backbone | Config | Latent | Weights |
 |---|---|---|---|
-| CogVideoX-5b-I2V (42 blocks, ~5 B) | `training/config/cogvideox_*.yaml` | 16 × F/4 × H/8 × W/8 | paper model, released checkpoints |
-| Wan2.2-TI2V-5B (30 blocks, 5 B) | `training/config/wan22_ti2v_*.yaml` | 48 × F/4 × H/16 × W/16 | new backbone, no released checkpoints yet |
+| CogVideoX-5b-I2V (42 blocks) | `training/config/cogvideox_*.yaml` | 16 × F/4 × H/8 × W/8 | paper model, released checkpoints |
+| Wan2.2-TI2V-5B (30 blocks) | `training/config/wan22_ti2v_*.yaml` | 48 × F/4 × H/16 × W/16 | train your own |
 
-## Code layout
+### Code layout
 
 ```
 model/gem4d/
@@ -89,14 +166,14 @@ examples/                   example manifests
 tests/test_smoke.py         CPU tests with tiny random models (`PYTHONPATH=model:. python tests/test_smoke.py`)
 ```
 
-## Environment
+### Environment
 
 ```bash
 conda create -n gem4d python=3.10 -y && conda activate gem4d
 pip install -r requirements.txt          # diffusers>=0.35 (Wan2.2 TI2V support)
 ```
 
-## Weights
+### Weights
 
 ```bash
 python tools/download_weights.py cogvideox da3            # CogVideoX GEM-4D training from the base model
@@ -112,7 +189,7 @@ python tools/download_weights.py wan2.2 da3               # Wan2.2-TI2V-5B GEM-4
 | `checkpoint-2/` | same repo — GEM-4D CogVideoX, step 42000 | `inference --weights` |
 | `Wan2.2-TI2V-5B-Diffusers/` | [`Wan-AI/Wan2.2-TI2V-5B-Diffusers`](https://huggingface.co/Wan-AI/Wan2.2-TI2V-5B-Diffusers) | `backbone.base_model` |
 
-## Data
+### Data
 
 There are **no predefined datasets**. List your clips in a manifest (JSON or JSONL):
 
@@ -139,7 +216,7 @@ condition. No depth files are needed: geometry comes from DA3 on the fly.
 To customise loading, subclass `training.data.video_dataset.ManifestVideoDataset` and override
 `read_frames(entry)`, `resize(frames, entry)` or `get_prompt(entry)`.
 
-## Training
+### Training
 
 ```bash
 # GEM-4D on CogVideoX, from the base model, 8 GPUs
@@ -185,7 +262,7 @@ Exports keep the newest `checkpoint.keep_last` plus every multiple of `checkpoin
 
 **Resume.** Re-run the same command with the same `experiment.output_dir`.
 
-## Inference
+### Inference
 
 ```bash
 bash training_bash/infer.sh --backbone cogvideox --base_model weights/cogvideox \
