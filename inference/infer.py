@@ -11,6 +11,8 @@
 --weights: a training export (runs/x/checkpoints/step_NNNNNN), the GEM-4D-Wan14B checkpoint, or
            omitted (= the base model). Writes <idx>_<clip>.mp4 and, with --side_by_side, <idx>_<clip>_gt_pred.mp4.
 --compose: a plain photo / single-view video -> the robot composite (main view left, x < 302 of 416).
+--lora:    a LoRA adapter (a LoRA training export step_NNNNNN or its lora/ folder) merged into --weights
+           at load time, e.g. your own fine-tune of GEM-4D-Wan14B (training/config/wan14b_gem4d_lora.yaml).
 --process4d: also run 4D-process on every generated video (DA3 + RAFT-small scene flow, see
            inference/process4d.py): <idx>_<clip>_4d.{html,mp4,json,npz}.
 Unset sampling options take the backbone's defaults (DEFAULTS below).
@@ -26,6 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "model"), str(ROOT)]
 
 from gem4d import build_backbone                                    # noqa: E402
+from gem4d.models.lora import load_lora                             # noqa: E402
 from gem4d.utils.video_io import first_frame, save_mp4, side_by_side, to_uint8  # noqa: E402
 from training.data.manifest import build_prompt, load_manifest      # noqa: E402
 from training.data.video_dataset import center_crop_resize, read_video  # noqa: E402
@@ -43,6 +46,8 @@ def main():
     ap.add_argument("--backbone", required=True, choices=list(DEFAULTS))
     ap.add_argument("--base_model", required=True, help="full model dir of the backbone")
     ap.add_argument("--weights", default=None, help="fine-tuned transformer (checkpoint dir); default: base")
+    ap.add_argument("--lora", default=None, help="LoRA adapter merged into --weights (dir / lora.safetensors / .pt)")
+    ap.add_argument("--lora_scale", type=float, default=1.0, help="adapter strength (1 = as trained)")
     src = ap.add_mutually_exclusive_group(required=True)
     src.add_argument("--manifest", help="clips / images with prompts (training/data/manifest.py)")
     src.add_argument("--image", help="one condition image (or video: its first frame); needs --prompt")
@@ -76,6 +81,9 @@ def main():
     if weights and os.path.isdir(os.path.join(weights, "transformer")):
         weights = os.path.join(weights, "transformer")
     bb = build_backbone(args.backbone, base_model=args.base_model, init_weights=weights)
+    if args.lora:
+        n = load_lora(bb.transformer, args.lora, scale=args.lora_scale)
+        print(f"merged LoRA {args.lora} into {n} layers (scale {args.lora_scale})", flush=True)
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     bb.to(dev, torch.bfloat16)
     pipe = bb.pipeline()

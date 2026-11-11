@@ -43,6 +43,19 @@ motion and scene flow. After training the Geometry DiT is dropped: the deployed 
 image-to-video generator with the backbone's size and speed. GEM-4D improves video prediction and
 geometric consistency on DROID and RLBench, and real-robot success from **61 % to 81 %**.
 
+## Contents
+
+| | What | Where |
+|---|---|---|
+| 1 | Train GEM-4D on **Wan2.2-TI2V-5B** | [Training GEM-4D](#1-2-training-gem-4d) · `training/config/wan5b_gem4d.yaml` |
+| 2 | Train GEM-4D on **Wan2.1-I2V-14B** | [Training GEM-4D](#1-2-training-gem-4d) · `training/config/wan14b_gem4d.yaml` |
+| 3 | Inference with **GEM-4D-Wan14B** | [Inference](#3-inference-with-gem-4d-wan14b) · `inference/infer.py` |
+| 4 | **GEM-4D-Wan14B** weights | [Checkpoint](#4-gem-4d-wan14b-checkpoint) · `tools/download_weights.py` |
+| 5 | **Depth & scene flow** of generated videos | [Depth & scene flow](#5-depth--scene-flow-4d-process) · `--process4d`, `inference/process4d.py` |
+| 6 | **LoRA fine-tuning** of GEM-4D-Wan14B on your data (no geometry branch) | [LoRA fine-tuning](#6-lora-fine-tuning-of-gem-4d-wan14b) · `training/config/wan14b_gem4d_lora.yaml` |
+
+Also: [method](#method) · [results](#results) · [code layout](#code-layout) · [citation](#citation)
+
 ## Installation
 
 ```bash
@@ -53,10 +66,20 @@ pip install -r requirements.txt
 ### Weights
 
 ```bash
-python tools/download_weights.py wan2.2 da3
-python tools/download_weights.py wan2.1 da3
-python tools/download_weights.py wan2.1 gem-4d-wan14b
+python tools/download_weights.py wan2.1 gem-4d-wan14b da3   # 3, 5, 6: GEM-4D-Wan14B inference, depth & flow, LoRA
+python tools/download_weights.py wan2.1 da3                # 2: train GEM-4D Wan-14B
+python tools/download_weights.py wan2.2 da3                # 1: train GEM-4D Wan-5B
 ```
+
+| Folder in `weights/` | Source | Used as |
+|---|---|---|
+| `Wan2.1-I2V-14B-480P/` | [`Wan-AI/Wan2.1-I2V-14B-480P`](https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-480P) | Wan-14B base: DiT, VAE, CLIP, umT5, tokenizer |
+| `Wan2.2-TI2V-5B-Diffusers/` | [`Wan-AI/Wan2.2-TI2V-5B-Diffusers`](https://huggingface.co/Wan-AI/Wan2.2-TI2V-5B-Diffusers) | Wan-5B base |
+| `gem-4d-wan14b/` | [`kaichen-z/Gem-4D`](https://huggingface.co/datasets/kaichen-z/Gem-4D) | GEM-4D-Wan14B DiT ([4](#4-gem-4d-wan14b-checkpoint)) |
+| `da3/` | [`zhouk777/gem4d-weight`](https://huggingface.co/datasets/zhouk777/gem4d-weight) (= [DA3-LARGE-1.1](https://huggingface.co/depth-anything/DA3-LARGE-1.1)) | geometry teacher (training), depth (4D-process) |
+
+CLIPSeg (`CIDAS/clipseg-rd64-refined`, foreground gate of the 4D-process) and RAFT-small (torchvision)
+download on first use.
 
 ### Data
 
@@ -130,6 +153,9 @@ bash training_bash/infer.sh --backbone wan2.1-i2v-14b --base_model weights/Wan2.
 # every entry of a manifest, with [GT | prediction] videos
 bash training_bash/infer.sh --backbone wan2.1-i2v-14b --base_model weights/Wan2.1-I2V-14B-480P \
     --weights weights/gem-4d-wan14b --manifest examples/val_manifest.json --output_dir outputs/wan14b --side_by_side
+
+# with your own LoRA adapter (6) on top, merged at load time
+bash training_bash/infer.sh ... --weights weights/gem-4d-wan14b --lora runs/wan14b_gem4d_lora/checkpoints/step_010000
 ```
 
 `--weights` also takes any training export (`runs/<exp>/checkpoints/step_N`; for Wan-5B use
@@ -168,7 +194,7 @@ gem-4d-wan14b/
 | Base | [Wan2.1-I2V-14B-480P](https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-480P) (Apache-2.0) |
 | Download | `python tools/download_weights.py wan2.1 gem-4d-wan14b` ([`kaichen-z/Gem-4D`](https://huggingface.co/datasets/kaichen-z/Gem-4D)) |
 | Inference | `--base_model weights/Wan2.1-I2V-14B-480P --weights weights/gem-4d-wan14b` (VAE, CLIP, umT5 and tokenizer come from the base folder) |
-| Further training | `backbone.init_weights=weights/gem-4d-wan14b` with `wan14b_gem4d.yaml` / `wan14b_rgb.yaml` |
+| Further training | `backbone.init_weights=weights/gem-4d-wan14b` with `wan14b_gem4d.yaml` / `wan14b_rgb.yaml`, or [6](#6-lora-fine-tuning-of-gem-4d-wan14b) |
 
 ## 5. Depth & scene flow (4D-process)
 
@@ -223,6 +249,118 @@ python inference/demo_video.py --crop 0,0,302,240 --output outputs/demo.mp4 \
     --row "DROID|droid.png|outputs/0000_droid.mp4|outputs/0000_droid_4d.npz" \
     --row "Bridge|bridge.png|outputs/0001_bridge.mp4|outputs/0001_bridge_4d.npz"
 ```
+
+## 6. LoRA fine-tuning of GEM-4D-Wan14B
+
+Adapt GEM-4D-Wan14B to a new robot, camera or task set cheaply: the checkpoint stays frozen and a
+rank-128 LoRA adapter is trained with the image-to-video loss only (no Geometry DiT, no DA3 teacher).
+
+```bash
+bash training_bash/train.sh training/config/wan14b_gem4d_lora.yaml \
+    data.train_manifest=/data/my_robot.json data.val_manifest=/data/my_robot_val.json
+```
+
+| Key | Value | |
+|---|---|---|
+| `backbone.init_weights` | `weights/gem-4d-wan14b` | the frozen starting point |
+| `lora.rank`, `lora.alpha` | 128, 128 | `lora.targets: null` = q, k, v, o, ffn.0, ffn.2 (400 layers, 0.6 B parameters) |
+| `optim` | lr 1e-4 cosine, AdamW (0.9, 0.999), no weight decay | |
+| batch | 2 per GPU × 8 GPUs × 4 accumulation = 64 | global batch of the original fine-tune |
+| `lora.init` | an adapter to continue from | |
+
+Each export holds only the adapter, `checkpoints/step_N/lora/{lora.safetensors, lora_config.json}`.
+Use it directly (`infer.sh ... --lora <step_N>`, optional `--lora_scale`) or merge it into a stand-alone
+checkpoint:
+
+```bash
+python tools/merge_lora.py --backbone wan2.1-i2v-14b --base_model weights/Wan2.1-I2V-14B-480P \
+    --weights weights/gem-4d-wan14b --lora runs/wan14b_gem4d_lora/checkpoints/step_010000 \
+    --output weights/gem-4d-wan14b-myrobot
+```
+
+`lora.enabled: true` works with every config (e.g. on the Wan-5B path, targets `to_q, to_k, to_v,
+to_out.0, ffn.net.0.proj, ffn.net.2`) and can be combined with the geometry loss.
+
+## Method
+
+```
+first frame + instruction ──► video DiT ──────────────────────────► video velocity ──► L_vid
+                                │ m_t  (block `hook_layer`, not detached)
+                                ▼
+ masked, noised geometry latent ──► Geometry DiT ──► geometry velocity ──► L_geo
+ g0 = projector(DA3 features)   (same noise as the video latent)
+
+                        L = L_vid + α · L_geo
+```
+
+The Geometry DiT sees the scene only through `m_t`, so `α · ∂L_geo/∂m_t` pushes depth, camera motion
+and scene flow into the video backbone; the geometry teacher stays frozen. The branch only reads from
+`m_t`, so it is removed after training.
+
+| Paper (Sec. 3.2) | Code |
+|---|---|
+| Video DiT, mid-level feature `m_t` | `model/gem4d/models/{wan5b,wan14b}.py`; forward hook on block `geometry.hook_layer` (`models/gem4d.py`) |
+| Frozen geometry model `G`, representation `g_0` | `geometry/teacher.py`: DA3 ViT-L layer 12 → frozen projector to the latent grid |
+| Mask mechanism `M` | `heads/geo_dit.py`: `geometry.mask_ratio` of tokens replaced by a learned mask token |
+| `v_ψ^geo(M(g_t), t, m_t)` | `GeoDiT`: cross-attention to `m_t` only |
+| `L = L_vid + α L_geo` | `models/gem4d.py`, `training/trainer.py` |
+| Geometry branch dropped at inference | `inference/infer.py` loads only the video DiT |
+
+Not in this repository: the inverse-dynamics module (video → robot actions) and the VGGT / depth-target ablations.
+
+## Results
+
+4D scene generation (paper Tab. 1; GEM-4D on a CogVideoX-5B backbone, not part of this release).
+R = real (DROID), S = simulated (RLBench).
+
+| D | Method | FVD ↓ | SSIM ↑ | PSNR ↑ | AbsRel ↓ | δ1 ↑ | Chamfer ↓ | Tracking ↑ |
+|---|---|---|---|---|---|---|---|---|
+| R | CogVideoX | 35.56 | 75.91 | 20.18 | 22.33 | 68.32 | 0.2670 | 66.22 |
+| R | Wan 2.2-14B | 33.43 | 76.24 | 20.70 | 21.39 | 71.18 | 0.2349 | 68.18 |
+| R | TesserAct | 33.28 | 75.66 | 20.08 | 22.07 | 66.80 | 0.2630 | 67.14 |
+| R | **GEM-4D** | **31.82** | **82.05** | **21.11** | **20.13** | **78.19** | **0.2001** | **71.23** |
+| S | CogVideoX | 40.21 | 75.51 | 20.03 | 15.41 | 70.99 | 0.2913 | 58.32 |
+| S | Wan 2.2-14B | 49.20 | 73.01 | 19.87 | 17.81 | 67.07 | 0.1762 | 61.99 |
+| S | TesserAct | 41.97 | 76.72 | 19.71 | 16.02 | 69.26 | 0.1813 | 61.15 |
+| S | **GEM-4D** | **27.94** | **80.27** | **23.36** | **14.11** | **74.13** | **0.0702** | **68.18** |
+
+More videos and real-robot rollouts: [gem-4d.github.io](https://gem-4d.github.io/).
+
+## Code layout
+
+```
+model/gem4d/
+  models/wan5b.py, wan14b.py   backbones (Wan2.2-TI2V-5B diffusers; Wan2.1-I2V-14B + 49-frame sampler)
+  models/wan21/                Wan2.1 DiT, VAE, CLIP, umT5, loader, flow schedule (Apache-2.0, NOTICE.md)
+  models/gem4d.py              video DiT + Geometry DiT + frozen projector
+  models/lora.py               LoRA layers: inject, save / load (incl. peft format), merge
+  heads/geo_dit.py             Geometry DiT
+  geometry/teacher.py          frozen Depth Anything 3 teacher + projector
+  process4d/                   depth & scene flow: scene_flow.py (DA3 + RAFT + CLIPSeg), flow_vis.py (arrows),
+                               viewer.py (3D viewer), render.py (point clouds), end_effector.py (gripper box)
+model/dependency/depth_anything_3/   vendored Depth Anything 3
+training/                      trainer.py, launch.py, config/*.yaml, data/ (manifest, dataset), train_utils/
+training_bash/train.sh         multi-GPU launcher (accelerate + DeepSpeed ZeRO-2)
+training_bash/infer.sh         inference launcher (= python inference/infer.py)
+inference/                     infer.py, process4d.py, teaser.py, demo_video.py
+tools/                         download_weights.py, merge_lora.py
+tests/test_smoke.py            CPU tests with tiny random models: PYTHONPATH=model:. python tests/test_smoke.py
+```
+
+## Implementation notes
+
+- **Wan-14B objective.** `x_t = (1 − s) x0 + s ε`, `s = 3u / (1 + 2u)`, target `ε − x0`,
+  loss over all latent frames weighted by a Gaussian of the timestep; the DiT input is 16 noisy + 4 mask +
+  16 condition channels, plus 257 CLIP tokens. Sampling: 30 Euler steps of the discrete shift-3 schedule
+  in fp32, CFG against an empty prompt.
+- **Wan-5B objective.** Shift-5 rectified flow, clean image latent at frame 0 with timestep 0 (excluded
+  from the loss). Exports are plain diffusers models (`WanImageToVideoPipeline(expand_timesteps=True)`).
+- **Geometry latent.** DA3 layer-12 features → frozen 1×1 conv to 256 → temporal average (stride 4) →
+  resize to the latent grid → frozen 1×1 conv to the latent channels. Geometry and video share one noise sample.
+- **Memory (Wan-14B).** Full fine-tuning plus the Geometry DiT (18.1 B trainable parameters): plain ZeRO-2
+  needs ≥ 141 GB GPUs; `accelerate_zero2_offload.yaml` peaks at 61 GB per 80 GB GPU. Offload JIT-builds
+  DeepSpeed's `cpu_adam` (torch ≥ 2.10 needs C++20; set `DS_SKIP_CUDA_CHECK=1` on a CUDA minor mismatch).
+  `train.sh` raises `ulimit -u` (8 ranks open many threads).
 
 ## License and attribution
 

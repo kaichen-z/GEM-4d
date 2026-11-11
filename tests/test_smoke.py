@@ -394,6 +394,68 @@ def test_process4d_render_and_end_effector():
     assert np.allclose(box_corners(np.zeros(3), np.ones(3)).max(0), 0.5)
 
 
+def _dit_out(dit):
+    torch.manual_seed(1)
+    x, t, ctx = torch.randn(1, 16, F, H, W), torch.tensor([500.0]), torch.randn(1, 8, 32)
+    cl, clip = torch.randn(1, 16, 1, H, W), torch.randn(1, 257, 1280)
+    with torch.no_grad():
+        return dit(x, t, ctx, clip_fea=clip, condition_latents=cl)
+
+
+def test_lora_wan14b_inject_merge_roundtrip():
+    from gem4d.models.lora import (WAN14B_TARGETS, inject_lora, load_lora, lora_modules, merge_lora,
+                                   read_lora, save_lora)
+    dit = tiny_dit().eval()
+    ref = _dit_out(dit)
+    names = inject_lora(dit, WAN14B_TARGETS, r=4, alpha=8)
+    assert len(names) == 4 * 10                                       # self q k v o, cross q k v o, ffn.0, ffn.2
+    assert not any("k_img" in n or "v_img" in n for n in names)
+    trainable = [n for n, p in dit.named_parameters() if p.requires_grad]
+    assert trainable and all(".lora_" in n for n in trainable)
+    assert torch.allclose(_dit_out(dit), ref, atol=1e-6)             # B = 0: LoRA starts as a no-op
+    with torch.no_grad():
+        for m in lora_modules(dit).values():
+            m.lora_B.normal_(std=0.05)
+    tuned = _dit_out(dit)
+    assert not torch.allclose(tuned, ref, atol=1e-4)
+    with tempfile.TemporaryDirectory() as d:
+        save_lora(dit, d, WAN14B_TARGETS)
+        sd, cfg = read_lora(d)
+        assert cfg["r"] == 4 and cfg["alpha"] == 8 and len(sd) == 2 * 40
+        fresh = tiny_dit().eval()
+        fresh.load_state_dict({k.replace(".base.", "."): v for k, v in dit.state_dict().items()
+                               if ".lora_" not in k})
+        assert load_lora(fresh, d) == 40                              # inject + load + merge
+        assert not lora_modules(fresh)
+        assert torch.allclose(_dit_out(fresh), tuned, atol=1e-5)
+        # peft-style keys in a .pt payload load the same way
+        peft = {f"base_model.model.{k.replace('.weight', '.default.weight')}": v for k, v in sd.items()}
+        torch.save({"lora": peft, "lora_config": cfg}, os.path.join(d, "step.pt"))
+        fresh2 = tiny_dit().eval()
+        fresh2.load_state_dict({k.replace(".base.", "."): v for k, v in dit.state_dict().items()
+                                if ".lora_" not in k})
+        load_lora(fresh2, os.path.join(d, "step.pt"))
+        assert torch.allclose(_dit_out(fresh2), tuned, atol=1e-5)
+    assert merge_lora(dit) == 40 and torch.allclose(_dit_out(dit), tuned, atol=1e-5)
+
+
+def test_lora_wan14b_training_step():
+    from gem4d.models.lora import WAN14B_TARGETS, inject_lora
+    bb = tiny_wan14b()
+    inject_lora(bb.transformer, WAN14B_TARGETS, r=4, alpha=4)
+    model = GEM4D(bb, geometry=False)
+    with torch.no_grad():                                              # B != 0 so A gets gradient too
+        for n, p in model.named_parameters():
+            if n.endswith("lora_B"):
+                p.normal_(std=0.02)
+    x0 = torch.randn(B, F, 16, H, W)
+    l_vid, l_geo = model(x0, condition(bb, x0), torch.randn(B, 8, 32), bb.sample_timesteps(B, "cpu"))
+    l_vid.backward()
+    grads = {n: p.grad for n, p in model.named_parameters() if p.requires_grad}
+    assert l_geo == 0 and grads and all(".lora_" in n for n in grads)
+    assert all(g is not None and g.abs().sum() > 0 for g in grads.values())
+
+
 def test_flow_panel_arrows_only_on_moving_foreground():
     from gem4d.process4d.flow_vis import FlowPanel
     f, h, w = 4, 90, 120
@@ -420,6 +482,15 @@ def test_robot_composite():
     out = robot_composite(img)
     assert out.shape == (240, 416, 3)
     assert out[:, :295].min() > 190 and out[:, 310:].max() < 10            # main view left, black right
+
+
+def test_lora_wan5b_targets():
+    from gem4d.models.lora import WAN5B_TARGETS, inject_lora
+    bb = tiny_wan5b()
+    names = inject_lora(bb.transformer, WAN5B_TARGETS, r=4, alpha=4)
+    assert len(names) == 4 * 10, names                                   # attn1 / attn2 q k v out, ffn x2
+    l_vid, _ = run_step(bb, geometry=False)
+    assert np.isfinite(l_vid)
 
 
 if __name__ == "__main__":

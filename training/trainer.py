@@ -1,6 +1,7 @@
 """GEM-4D trainer (one code path for every backbone).
 
-    L = L_vid + alpha * min(1, step / geo_warmup) * L_geo
+    L = L_vid + alpha * min(1, step / geo_warmup) * L_geo        (geometry.enabled)
+    L = L_vid                                                 (RGB-only; full or LoRA fine-tuning)
 """
 import logging
 import math
@@ -17,6 +18,7 @@ from torch.utils.data import DataLoader
 
 from gem4d import GEM4D, build_backbone
 from gem4d.geometry.teacher import DA3Teacher
+from gem4d.models.lora import inject_lora, load_lora, resolve_targets
 from gem4d.utils.video_io import first_frame, save_mp4, side_by_side, to_uint8
 
 from .data.manifest import build_prompt, load_manifest
@@ -47,6 +49,13 @@ class Trainer:
         # ---- model ----
         b, g = cfg.backbone, cfg.geometry
         self.bb = build_backbone(b.name, base_model=b.base_model, init_weights=b.init_weights)
+        lc = cfg.lora
+        if lc.enabled:                    # freeze the DiT, train only the LoRA matrices
+            self.lora_targets = resolve_targets(b.name, lc.targets)
+            n_lora = len(inject_lora(self.bb.transformer, self.lora_targets, lc.rank, lc.alpha, lc.dropout))
+            if lc.init:
+                load_lora(self.bb.transformer, lc.init, merge=False)
+            logger.info(f"LoRA r={lc.rank} alpha={lc.alpha} on {n_lora} layers ({self.lora_targets})")
         self.model = GEM4D(self.bb, geometry=g.enabled, hook_layer=g.hook_layer, geo_depth=g.depth,
                            mask_ratio=g.mask_ratio, geo_scale=g.scale, x0_target=g.x0_target,
                            coupled_noise=g.coupled_noise)
@@ -79,9 +88,9 @@ class Trainer:
         self.step = ckpt.resume(self.acc, out)
         if self.acc.is_main_process:
             self.acc.init_trackers(cfg.experiment.name, config={"lr": o.lr, "backbone": b.name,
-                                                                "geometry": g.enabled})
+                                                                "geometry": g.enabled, "lora": lc.enabled})
             n_train = sum(p.numel() for p in params)
-            logger.info(f"backbone={b.name} geometry={g.enabled} trainable={n_train / 1e9:.2f}B "
+            logger.info(f"backbone={b.name} geometry={g.enabled} lora={lc.enabled} trainable={n_train / 1e9:.3f}B "
                         f"clips={len(self.train_ds)} start_step={self.step}")
 
     # ------------------------------------------------------------------
@@ -130,7 +139,8 @@ class Trainer:
                 if self.step % cfg.checkpoint.every == 0 or self.step == max_steps:
                     ckpt.save(acc, self.model, cfg.experiment.output_dir, self.step,
                               keep_last=cfg.checkpoint.keep_last, keep_every=cfg.checkpoint.keep_every,
-                              save_state=cfg.checkpoint.save_state)
+                              save_state=cfg.checkpoint.save_state,
+                              lora_targets=getattr(self, "lora_targets", None))
                 v = cfg.validation
                 if self.val_ds is not None and (self.step % v.every == 0 or self.step == 1):
                     self.validate()

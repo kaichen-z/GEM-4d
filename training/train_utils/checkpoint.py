@@ -1,7 +1,9 @@
 """Checkpoints.
 
     <output_dir>/checkpoints/
-        step_000500/transformer/      exported video DiT (diffusers format) -> inference / fine-tuning
+        step_000500/transformer/      exported video DiT -> inference / fine-tuning
+        step_000500/lora/             instead of transformer/ when lora.enabled: lora.safetensors +
+                                      lora_config.json (merge with tools/merge_lora.py or infer.py --lora)
         step_000500/geometry.safetensors   Geometry DiT + projector (training only)
         ...
         state/                         full training state of the newest save (accelerate/DeepSpeed:
@@ -18,6 +20,8 @@ from typing import Optional
 
 import torch
 from safetensors.torch import save_file
+
+from gem4d.models.lora import has_lora, save_lora
 
 STEP_RE = re.compile(r"^step_(\d+)$")
 
@@ -42,7 +46,7 @@ def latest_state(output_dir: str) -> Optional[int]:
 
 
 def save(accelerator, model, output_dir: str, step: int, keep_last: int = 3, keep_every: int = 2000,
-         save_state: bool = True):
+         save_state: bool = True, lora_targets=None):
     """Call on ALL ranks (DeepSpeed shards the optimizer state across ranks)."""
     root = ckpt_root(output_dir)
     step_dir = os.path.join(root, f"step_{step:06d}")
@@ -55,8 +59,11 @@ def save(accelerator, model, output_dir: str, step: int, keep_last: int = 3, kee
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
         m = accelerator.unwrap_model(model)
-        m.transformer.save_pretrained(os.path.join(step_dir, "transformer"), safe_serialization=True,
-                                      max_shard_size="5GB")
+        if has_lora(m.transformer):           # only the adapter: the frozen DiT is unchanged
+            save_lora(m.transformer, os.path.join(step_dir, "lora"), lora_targets or [])
+        else:
+            m.transformer.save_pretrained(os.path.join(step_dir, "transformer"), safe_serialization=True,
+                                          max_shard_size="5GB")
         geo = {}
         for name in ("geo_dit", "projector"):
             if hasattr(m, name):

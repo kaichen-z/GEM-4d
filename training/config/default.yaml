@@ -22,6 +22,14 @@ geometry:                         # GEM-4D geometry branch (paper Sec. 3.2); ena
   scale: 1.0                      # scale of the projected geometry latent
   init_geometry: null             # optional geometry.safetensors (Geo-DiT + projector) to start from
 
+lora:                             # LoRA fine-tuning of the video DiT (base weights frozen, only B A trained)
+  enabled: false
+  rank: 128
+  alpha: 128
+  dropout: 0.0
+  targets: null                   # module-name suffixes (null = backbone default, see model/gem4d/models/lora.py)
+  init: null                      # optional adapter (dir / lora.safetensors / .pt) to continue from
+
 data:
   train_manifest: ???             # see training/data/manifest.py
   val_manifest: null

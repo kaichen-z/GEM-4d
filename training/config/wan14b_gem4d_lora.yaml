@@ -1,0 +1,13 @@
+_base_: default.yaml
+# LoRA fine-tuning of the released GEM-4D-Wan14B checkpoint on your own data, RGB-only (no geometry branch,
+# no DA3 teacher). Rank 128, alpha 128 on q, k, v, o (self- and
+# cross-attention) and ffn.0 / ffn.2 of all 40 blocks, lr 1e-4 cosine, AdamW (0.9, 0.999) without weight
+# decay, global batch 64 (= 2 per GPU x 8 GPUs x 4 accumulation steps).
+experiment: {name: wan14b_gem4d_lora, output_dir: runs/wan14b_gem4d_lora}
+backbone: {name: wan2.1-i2v-14b, base_model: weights/Wan2.1-I2V-14B-480P, init_weights: weights/gem-4d-wan14b}
+geometry: {enabled: false}
+lora: {enabled: true, rank: 128, alpha: 128}
+data: {height: 240, width: 416, num_frames: 49, frame_sampling: event, lowercase_prompt: false, image_dropout: 0.0}
+optim: {lr: 1.0e-4, betas: [0.9, 0.999], weight_decay: 0.0, scheduler: cosine, warmup_steps: 100, grad_accum: 4}
+train: {batch_size: 2}
+validation: {num_inference_steps: 30, guidance_scale: 4.0}
