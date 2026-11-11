@@ -1,11 +1,16 @@
-"""Download the weights GEM-4D trains from.
+"""Download weights for GEM-4D training and inference.
 
     da3          depth-anything/DA3-LARGE-1.1  (official geometry teacher)   (~1.6 GB) -> geometry.teacher
     gem-4d-wan14b  GEM-4D-Wan14B DiT (transformer/), from ``kaichen-z/Gem-4D`` (dataset)
                                                                             (~33 GB)  -> --weights /
-                   backbone.init_weights (needs the wan2.1 folder for VAE, CLIP, umT5, tokenizer)
+                   backbone.init_weights
     wan2.2       Wan-AI/Wan2.2-TI2V-5B-Diffusers  (GEM-4D Wan-5B base)       (~34 GB)  -> backbone.base_model
     wan2.1       Wan-AI/Wan2.1-I2V-14B-480P       (GEM-4D Wan-14B base)      (~82 GB)  -> backbone.base_model
+
+GEM-4D-Wan14B video inference requires both wan2.1 and gem-4d-wan14b.
+Use the official wan2.1 folder for --base_model (video VAE, CLIP image encoder,
+UMT5 text encoder, and tokenizer) and gem-4d-wan14b for --weights (fine-tuned DiT).
+DA3 is used for geometry-supervised training or optional depth and scene-flow post-processing.
 
 Usage
 -----

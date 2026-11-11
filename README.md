@@ -65,10 +65,16 @@ pip install -r requirements.txt
 
 ### Weights
 
+**GEM-4D-Wan14B video inference requires both weight folders.** The GEM-4D checkpoint supplies the
+fine-tuned DiT (`--weights`). The official Wan2.1 folder supplies the video VAE, CLIP image encoder,
+UMT5 text encoder, and tokenizer (`--base_model`). The `wan2.1` download fetches the full upstream
+snapshot (~82 GB), including the stock DiT used for training from the Wan2.1 base.
+
 ```bash
-python tools/download_weights.py wan2.1 gem-4d-wan14b da3   # 3, 5, 6: GEM-4D-Wan14B inference, depth & flow, LoRA
-python tools/download_weights.py wan2.1 da3                # 2: train GEM-4D Wan-14B
-python tools/download_weights.py wan2.2 da3                # 1: train GEM-4D Wan-5B
+python tools/download_weights.py wan2.1 gem-4d-wan14b  # 3, 6: video inference or LoRA fine-tuning
+python tools/download_weights.py da3                   # 5: optional depth and scene-flow post-processing
+python tools/download_weights.py wan2.1 da3             # 2: train GEM-4D Wan-14B
+python tools/download_weights.py wan2.2 da3             # 1: train GEM-4D Wan-5B
 ```
 
 | Folder in `weights/` | Source | Used as |
@@ -144,6 +150,9 @@ training only), `checkpoints/state/` (resumable state), `vis/step_N/*.mp4` (vali
 
 ## 3. Inference with GEM-4D-Wan14B
 
+Use [both weight folders](#weights) for video generation. DA3 is used when you enable `--process4d`
+for depth and scene-flow post-processing.
+
 ```bash
 # one photo + instruction (--compose: photo -> the 416 x 240 robot composite the model was trained on)
 bash training_bash/infer.sh --backbone wan2.1-i2v-14b --base_model weights/Wan2.1-I2V-14B-480P \
@@ -192,8 +201,8 @@ gem-4d-wan14b/
 | | |
 |---|---|
 | Base | [Wan2.1-I2V-14B-480P](https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-480P) (Apache-2.0) |
-| Download | `python tools/download_weights.py wan2.1 gem-4d-wan14b` ([`kaichen-z/Gem-4D`](https://huggingface.co/datasets/kaichen-z/Gem-4D)) |
-| Inference | `--base_model weights/Wan2.1-I2V-14B-480P --weights weights/gem-4d-wan14b` (VAE, CLIP, umT5 and tokenizer come from the base folder) |
+| Download | `python tools/download_weights.py wan2.1 gem-4d-wan14b` (official Wan2.1 components and the fine-tuned DiT from [`kaichen-z/Gem-4D`](https://huggingface.co/datasets/kaichen-z/Gem-4D)) |
+| Inference | `--base_model weights/Wan2.1-I2V-14B-480P` supplies the VAE, CLIP image encoder, UMT5 text encoder, and tokenizer. `--weights weights/gem-4d-wan14b` supplies the fine-tuned DiT. |
 | Further training | `backbone.init_weights=weights/gem-4d-wan14b` with `wan14b_gem4d.yaml` / `wan14b_rgb.yaml`, or [6](#6-lora-fine-tuning-of-gem-4d-wan14b) |
 
 ## 5. Depth & scene flow (4D-process)
