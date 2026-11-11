@@ -11,6 +11,8 @@
 --weights: a training export (runs/x/checkpoints/step_NNNNNN), the GEM-4D-Wan14B checkpoint, or
            omitted (= the base model). Writes <idx>_<clip>.mp4 and, with --side_by_side, <idx>_<clip>_gt_pred.mp4.
 --compose: a plain photo / single-view video -> the robot composite (main view left, x < 302 of 416).
+--process4d: also run 4D-process on every generated video (DA3 + RAFT-small scene flow, see
+           inference/process4d.py): <idx>_<clip>_4d.{html,mp4,json,npz}.
 Unset sampling options take the backbone's defaults (DEFAULTS below).
 """
 import argparse
@@ -27,6 +29,7 @@ from gem4d import build_backbone                                    # noqa: E402
 from gem4d.utils.video_io import first_frame, save_mp4, side_by_side, to_uint8  # noqa: E402
 from training.data.manifest import build_prompt, load_manifest      # noqa: E402
 from training.data.video_dataset import center_crop_resize, read_video  # noqa: E402
+from inference.process4d import add_args as add_4d_args, parse_crop  # noqa: E402
 
 DEFAULTS = {
     "wan2.2-ti2v-5b": dict(steps=50, guidance_scale=5.0, height=480, width=640, fps=16, seed=42),
@@ -60,6 +63,8 @@ def main():
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--side_by_side", action="store_true", help="also write [GT | prediction] (video inputs)")
     ap.add_argument("--cpu_offload", action="store_true", help="model CPU offload (wan2.2-ti2v-5b only)")
+    ap.add_argument("--process4d", action="store_true", help="run 4D-process (scene flow + 3D viewer) on each video")
+    add_4d_args(ap, prefix="process4d_")
     args = ap.parse_args()
     if args.image and not args.prompt:
         ap.error("--image needs --prompt")
@@ -82,6 +87,12 @@ def main():
     if args.backbone == "wan2.1-i2v-14b":
         extra = dict(negative_prompt=args.negative_prompt, shift=args.shift)
 
+    proc4d = None
+    if args.process4d:
+        from gem4d.process4d import Process4D, run_4d_process
+        proc4d = Process4D(da3=args.process4d_da3, gap=args.process4d_gap, process_res=args.process4d_process_res,
+                           device=dev, seg=args.process4d_seg, min_flow_px=args.process4d_min_flow_px)
+
     entries = ([{"video": args.image, "prompt": args.prompt, "robot": ""}] if args.image
                else load_manifest(args.manifest, args.data_root))
     for i, entry in enumerate(entries):
@@ -100,6 +111,11 @@ def main():
                 gt = [center_crop_resize([f], size)[0] for f in read_video(Path(entry["video"]))]
                 save_mp4(side_by_side(gt, to_uint8(frames)), out.replace(".mp4", "_gt_pred.mp4"), fps=opt["fps"])
             print(f"[{i}] {prompt!r} -> {out} ({len(frames)} frames)", flush=True)
+            if proc4d is not None:
+                st = run_4d_process(proc4d, to_uint8(frames), args.output_dir, name,
+                                    crop=parse_crop(args.process4d_crop), fps=opt["fps"])["stats"]
+                print(f"[{i}] 4D-process -> {out[:-4]}_4d.html  dynamic {100 * st['dynamic_fraction']:.2f}% "
+                      f"of pixels, valid {100 * st['valid_fraction']:.1f}%", flush=True)
 
 
 if __name__ == "__main__":

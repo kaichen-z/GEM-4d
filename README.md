@@ -170,6 +170,60 @@ gem-4d-wan14b/
 | Inference | `--base_model weights/Wan2.1-I2V-14B-480P --weights weights/gem-4d-wan14b` (VAE, CLIP, umT5 and tokenizer come from the base folder) |
 | Further training | `backbone.init_weights=weights/gem-4d-wan14b` with `wan14b_gem4d.yaml` / `wan14b_rgb.yaml` |
 
+## 5. Depth & scene flow (4D-process)
+
+`--process4d` reads 4D structure out of every generated video (inference only, nothing is trained):
+
+```bash
+# during generation (composite robot videos: process the main view, x < 302 of 416)
+bash training_bash/infer.sh --backbone wan2.1-i2v-14b --base_model weights/Wan2.1-I2V-14B-480P \
+    --weights weights/gem-4d-wan14b --image first_frame.png --prompt "..." --output_dir outputs/wan14b \
+    --process4d --process4d_da3 weights/da3 --process4d_crop 0,0,302,240
+
+# on existing videos, plus one page with all of them as tabs
+python inference/process4d.py --videos outputs/wan14b/*.mp4 --da3 weights/da3 --crop 0,0,302,240 \
+    --output_dir outputs/wan14b_4d --viewer_all outputs/wan14b_4d/all_4d.html
+```
+
+Per video:
+
+| File | Content |
+|---|---|
+| `<clip>_4d.mp4` | frame \| DA3 depth with white scene-flow arrows on the moving robot / object only |
+| `<clip>_4d.html` | interactive point-cloud viewer ([DynPoint](https://dynpoint.github.io/) style): RGB / depth colours, scene-flow segments of the dynamic points, camera frustum, frame slider |
+| `<clip>_4d.npz` | depth, confidence, cameras, optical flow, scene flow, dynamic / foreground masks, camera shake |
+| `<clip>_4d.json` | valid / dynamic / foreground fractions, flow statistics |
+
+How it stays clean:
+
+1. **Depth and cameras.** Depth Anything 3 predicts depth, intrinsics and poses for the whole clip;
+   pixels are lifted to world points `X_t`.
+2. **Scene flow.** [RAFT-small](https://pytorch.org/vision/stable/models/raft.html) optical flow `t → t+3`
+   (and back) matches pixels; `S_t(p) = A_t(X_{t+3}(p + flow(p))) − X_t(p)`, where `A_t` is a similarity
+   (Umeyama) fitted on the background, so DA3's frame-to-frame scale / pose drift cancels.
+3. **Foreground only.** CLIPSeg masks ("a robot arm", "a white robot arm", "a robot gripper", "a human
+   hand", "an object held by a robot gripper"); background scene flow is set to zero.
+4. **No camera shake.** The background's median optical flow is subtracted; a foreground pixel moves only
+   if the rest exceeds `--min_flow_px` (1.5 px). Matches failing the forward-backward check are dropped.
+5. **Arrows, not colours.** `<clip>_4d.mp4` draws one anti-aliased arrow per 30 px cell of moving
+   foreground (flow averaged over 3 frames, length relative to the clip's motion) over plain depth
+   (`gem4d.process4d.flow_vis.FlowPanel`).
+
+Options: `--process4d_gap` (3), `--process4d_process_res` (DA3 resolution, 504), `--process4d_seg none`
+(no foreground gate). Scene flow is in DA3's non-metric units.
+
+### Figures: teaser panel and demo video
+
+```bash
+# generated frames, 3D point clouds and an end-effector box for one generated video
+python inference/teaser.py --video outputs/teaser/0000_photo.mp4 --initial photo.png \
+    --crop 0,0,302,240 --da3 weights/da3 --output_dir outputs/teaser/figure
+# demo video: one row per example, [input image | generated video | depth & scene flow]
+python inference/demo_video.py --crop 0,0,302,240 --output outputs/demo.mp4 \
+    --row "DROID|droid.png|outputs/0000_droid.mp4|outputs/0000_droid_4d.npz" \
+    --row "Bridge|bridge.png|outputs/0001_bridge.mp4|outputs/0001_bridge_4d.npz"
+```
+
 ## License and attribution
 
 - `model/gem4d/models/wan21/`: Wan2.1 and DiffSynth-Studio components (Apache-2.0, MIT packaging);

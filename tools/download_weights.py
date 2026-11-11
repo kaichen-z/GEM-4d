@@ -13,6 +13,7 @@ Usage
     python tools/download_weights.py wan2.2 da3            # train GEM-4D Wan-5B
     python tools/download_weights.py wan2.1 da3            # train GEM-4D Wan-14B
     python tools/download_weights.py wan2.1 gem-4d-wan14b      # GEM-4D-Wan14B inference / fine-tuning
+    python tools/download_weights.py wan2.1 gem-4d-wan14b da3  # ... plus depth & scene flow (4D-process)
     python tools/download_weights.py --dest /data/gem4d    # destination root (default <repo>/weights)
 """
 import argparse

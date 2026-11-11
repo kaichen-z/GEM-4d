@@ -232,6 +232,187 @@ def test_checkpoint_prune():
         assert list_steps(d) == [2000, 3000, 3500]
 
 
+def _synthetic_4d(drift=1.0):
+    """Plane at depth 2 seen by a camera moving +0.1 in x; a 12x12 patch moves by (0, 0.2, 0).
+    drift scales frame 1's depth (a global DA3-like scale error)."""
+    from gem4d.process4d import unproject
+    h, w, f = 48, 64, 40.0
+    K = torch.tensor([[f, 0, w / 2], [0, f, h / 2], [0, 0, 1.0]]).expand(2, 3, 3)
+    c2w = torch.eye(4).repeat(2, 1, 1)
+    c2w[1, 0, 3] = 0.1
+    depth = torch.full((2, h, w), 2.0)
+    points = unproject(depth, K, c2w)
+    patch = torch.zeros(h, w, dtype=torch.bool)
+    patch[10:22, 20:32] = True
+    delta = torch.tensor([0.0, 0.2, 0.0])
+    moved = points[0] + patch[..., None] * delta                                 # world position at t+1
+    cam1 = moved - c2w[1, :3, 3]
+    q = (cam1 / cam1[..., 2:]) @ K[0].T
+    v, u = torch.meshgrid(torch.arange(h) + 0.5, torch.arange(w) + 0.5, indexing="ij")
+    fw = torch.stack([q[..., 0] - u, q[..., 1] - v])[None]
+    if drift != 1.0:
+        depth = depth.clone()
+        depth[1] *= drift
+        points = unproject(depth, K, c2w)
+    return points, depth, fw, patch, delta
+
+
+def test_process4d_scene_flow():
+    from gem4d.process4d import scene_flow
+    from gem4d.process4d.scene_flow import _DEPENDENCY
+    assert (_DEPENDENCY / "depth_anything_3" / "api.py").is_file()
+    points, depth, fw, patch, delta = _synthetic_4d()
+    ok = torch.ones(depth.shape, dtype=torch.bool)
+    sf, valid, dyn, thr, A, shake = scene_flow(points, ok, fw, -fw, gap=1, fb_abs=1e9, depth=depth)
+    inner = torch.zeros_like(patch)
+    inner[12:20, 22:30] = True
+    static = valid[0] & ~patch
+    static[8:24, 18:34] = False                                                  # away from the patch border
+    assert valid[0].float().mean() > 0.8
+    assert sf[0][static].abs().max() < 1e-4, sf[0][static].abs().max()
+    assert torch.allclose(sf[0][inner & valid[0]], delta.expand(int((inner & valid[0]).sum()), 3), atol=1e-4)
+    assert dyn[0][inner & valid[0]].all() and not dyn[0][static].any()
+    assert 0.03 < float(thr[0]) < 0.05                                           # 2 % of the median depth
+    assert torch.allclose(A[0], torch.eye(4), atol=1e-4)                         # nothing to correct
+
+
+def test_process4d_alignment_removes_depth_drift():
+    from gem4d.process4d import scene_flow
+    points, depth, fw, patch, delta = _synthetic_4d(drift=1.06)
+    ok = torch.ones(depth.shape, dtype=torch.bool)
+    inner = torch.zeros_like(patch)
+    inner[12:20, 22:30] = True
+    static = ~patch
+    static[8:24, 18:34] = False
+    sf, valid, dyn, thr, A, shake = scene_flow(points, ok, fw, -fw, gap=1, fb_abs=1e9, depth=depth, align=False)
+    # without alignment the drift moves the whole static scene and hides the real motion
+    assert sf[0][static & valid[0]].norm(dim=-1).median() > 0.05 and not dyn[0][inner & valid[0]].all()
+    sf, valid, dyn, thr, A, shake = scene_flow(points, ok, fw, -fw, gap=1, fb_abs=1e9, depth=depth)
+    m = static & valid[0]
+    assert sf[0][m].norm(dim=-1).max() < 1e-3 and not dyn[0][m].any()
+    assert abs(float(torch.det(A[0, :3, :3])) ** (1 / 3) - 1 / 1.06) < 1e-3
+    got = sf[0][inner & valid[0]]
+    assert dyn[0][inner & valid[0]].all() and (got - delta).norm(dim=-1).max() < 1e-3
+
+
+def test_process4d_foreground_and_shake_gates():
+    from gem4d.process4d import scene_flow
+    points, depth, fw, patch, delta = _synthetic_4d()
+    ok = torch.ones(depth.shape, dtype=torch.bool)
+    inner = torch.zeros_like(patch)
+    inner[12:20, 22:30] = True
+    # foreground mask excludes the moving patch: nothing may be dynamic
+    fg = torch.zeros(depth.shape, dtype=torch.bool)
+    *_, dyn, _, _, _ = scene_flow(points, ok, fw, -fw, gap=1, fb_abs=1e9, depth=depth, foreground=fg)
+    assert not dyn.any()
+    # foreground covers the patch: it is found, and nothing outside the foreground is dynamic
+    fg[:, 8:24, 18:34] = True
+    sf, valid, dyn, thr, A, shake = scene_flow(points, ok, fw, -fw, gap=1, fb_abs=1e9, depth=depth, foreground=fg)
+    assert dyn[0][inner & valid[0]].all() and not dyn[0][~fg[0]].any()
+    # shake = median background flow (the camera translation); a huge min_flow_px suppresses everything
+    bg = valid[0] & ~fg[0]
+    assert torch.allclose(shake[0], fw[0].permute(1, 2, 0)[bg].median(0).values)
+    *_, dyn, _, _, _ = scene_flow(points, ok, fw, -fw, gap=1, fb_abs=1e9, depth=depth, foreground=fg,
+                                  min_flow_px=1e6)
+    assert not dyn.any()
+
+
+def test_process4d_viewer_and_summary():
+    from gem4d.process4d import Result4D, viewer_sequence, write_viewer
+    from gem4d.process4d.viewer import summary_frames
+    from gem4d.process4d import scene_flow
+    points, depth, fw, patch, delta = _synthetic_4d()
+    ok = torch.ones(depth.shape, dtype=torch.bool)
+    sf, valid, dyn, thr, A, shake = scene_flow(points, ok, fw, -fw, gap=1, fb_abs=1e9, depth=depth)
+    h, w = depth.shape[1:]
+    K = np.array([[40.0, 0, w / 2], [0, 40.0, h / 2], [0, 0, 1]])
+    c2w = np.stack([np.eye(4), np.eye(4)])
+    c2w[1, 0, 3] = 0.1
+    r = Result4D(images=np.zeros((2, h, w, 3), np.uint8), depth=depth.numpy(), conf=np.ones((2, h, w), np.float32),
+                 K=np.stack([K, K]), c2w=c2w, points=points.numpy(), conf_ok=ok.numpy(),
+                 flow=fw.permute(0, 2, 3, 1).numpy(), sf=sf.numpy(), valid=valid.numpy(), dynamic=dyn.numpy(),
+                 gap=1, threshold=thr.numpy(), align=A.numpy(), shake=shake.numpy(),
+                 foreground=np.ones(depth.shape, bool))
+    assert summary_frames(r).shape == (1, h, 2 * w, 3)                     # frame | depth & scene-flow arrows
+    seq = viewer_sequence(r, "toy", max_points=500)
+    fr = seq["frames"][0]
+    assert fr["n"] == 500 and fr["m"] == int(dyn[0].sum()) and len(fr["c2w"]) == 16
+    import base64
+    d0 = np.frombuffer(base64.b64decode(fr["dyn0"]), np.float32).reshape(-1, 3)
+    d1 = np.frombuffer(base64.b64decode(fr["dyn1"]), np.float32).reshape(-1, 3)
+    move = (d1 - d0) / np.linalg.norm(d1 - d0, axis=1, keepdims=True)
+    assert np.allclose(move, [0, -1, 0], atol=1e-3)                              # +y (down) in OpenCV = -y in three.js
+    with tempfile.TemporaryDirectory() as d:
+        write_viewer(os.path.join(d, "v.html"), [seq])
+        html = open(os.path.join(d, "v.html")).read()
+        assert "window.P4D_DATA = [" in html and "__DATA__" not in html
+
+
+
+def test_process4d_render_and_end_effector():
+    from gem4d.process4d import Result4D
+    from gem4d.process4d.end_effector import EndEffectorTracker, box_corners, draw_box, project
+    from gem4d.process4d.render import orbit, render_points
+    K = np.array([[50.0, 0, 32], [0, 50.0, 24], [0, 0, 1]])
+    # z-buffer: the nearer of two points on the same ray wins
+    img = render_points(np.array([[0, 0, 2.0], [0, 0, 1.0]]), np.array([[255, 0, 0], [0, 0, 255]], np.uint8),
+                        K, np.eye(4), (48, 64), radius=2)
+    assert tuple(img[24, 32]) == (0, 0, 255) and (img != 255).any(-1).sum() == 25
+    # orbit keeps the distance to the pivot and still looks at it
+    c = orbit(np.eye(4), np.array([0, 0, 2.0]), yaw_deg=30, pitch_deg=10)
+    assert abs(np.linalg.norm(c[:3, 3] - [0, 0, 2]) - 2) < 1e-6
+    uv, z = project(np.array([[0, 0, 2.0]]), K, c)
+    assert np.allclose(uv[0], [32, 24], atol=1e-6) and z[0] > 0
+    # tracker: a fake segmenter marks a 6x6 "gripper" moving right by 2 px per frame on a plane at depth 2
+    f, h, w = 5, 48, 64
+    depth = np.full((f, h, w), 2.0, np.float32)
+    v, u = np.mgrid[0:h, 0:w] + 0.5
+    cam = np.stack([(u - 32) / 50 * 2, (v - 24) / 50 * 2, np.full_like(u, 2.0)], -1).astype(np.float32)
+    points = np.repeat(cam[None], f, 0)
+    masks = np.zeros((f, h, w), bool)
+    for t in range(f):
+        masks[t, 20:26, 20 + 2 * t:26 + 2 * t] = True
+
+    class FakeSeg:
+        prompts, threshold, dilate = ["x"], 0.5, 0
+
+        def __call__(self, images):
+            return torch.from_numpy(masks)
+
+    r = Result4D(images=np.zeros((f, h, w, 3), np.uint8), depth=depth, conf=np.ones_like(depth), K=np.stack([K] * f),
+                 c2w=np.stack([np.eye(4)] * f), points=points, conf_ok=np.ones((f, h, w), bool),
+                 flow=np.zeros((f - 1, h, w, 2), np.float32), sf=np.zeros((f - 1, h, w, 3), np.float32),
+                 valid=np.ones((f - 1, h, w), bool), dynamic=np.zeros((f - 1, h, w), bool), gap=1,
+                 threshold=np.zeros(f - 1), align=np.stack([np.eye(4)] * (f - 1)))
+    ee = EndEffectorTracker(segmenter=FakeSeg(), smooth=0.0)(r)
+    assert ee["found"].all() and ee["corners"].shape == (f, 8, 3)
+    assert np.allclose(np.diff(ee["center"][:, 0]), 2 / 50 * 2, atol=1e-5)         # 2 px at depth 2
+    uv, _ = project(ee["center"], K, np.eye(4))
+    assert np.allclose(uv[:, 1], 23.0, atol=0.3)
+    boxed = draw_box(np.zeros((h, w, 3), np.uint8), ee["corners"][0], K, np.eye(4))
+    assert (boxed[..., 1] > 200).sum() > 20
+    assert np.allclose(box_corners(np.zeros(3), np.ones(3)).max(0), 0.5)
+
+
+def test_flow_panel_arrows_only_on_moving_foreground():
+    from gem4d.process4d.flow_vis import FlowPanel
+    f, h, w = 4, 90, 120
+    depth = np.tile(np.linspace(1, 3, h, dtype=np.float32)[:, None], (f, 1, w))
+    flow = np.zeros((f - 1, h, w, 2), np.float32)
+    flow[..., 0] = 0.4                                                 # camera shake everywhere ...
+    flow[:, 30:60, 60:90, 0] += 6.0                                    # ... plus a moving arm
+    fg = np.zeros((f, h, w), bool)
+    fg[:, 30:60, 60:90] = True
+    panel = FlowPanel(depth, flow, np.zeros((f - 1, h, w), bool), fg, np.full((f - 1, 2), [0.4, 0]), step=15)
+    arrows = panel.arrows(1)
+    assert arrows and all(60 <= x <= 90 and 30 <= y <= 60 for x, y, _ in arrows)
+    assert all(abs(a[2][0] - 6.0) < 1e-4 and abs(a[2][1]) < 1e-4 for a in arrows)   # shake removed
+    img = panel(1)
+    assert img.shape == (h, w, 3)
+    clean = FlowPanel(depth, flow, np.zeros((f - 1, h, w), bool), np.zeros((f, h, w), bool),
+                      np.full((f - 1, 2), [0.4, 0]), step=15)
+    assert not clean.arrows(1) and np.array_equal(clean(1)[:20], img[:20])   # background untouched
+
 
 def test_robot_composite():
     from gem4d.utils.video_io import robot_composite
