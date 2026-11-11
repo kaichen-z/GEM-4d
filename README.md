@@ -29,7 +29,7 @@
     &nbsp;
     <a href="https://gem-4d.github.io/"><img src="https://img.shields.io/badge/Project-Page-F6D9A0?labelColor=FFF3DC" alt="Project Page" /></a>
     &nbsp;
-    <a href="https://huggingface.co/datasets/zhouk777/gem4d-weight"><img src="https://img.shields.io/badge/Weights-HuggingFace-C9E4CA?labelColor=EAF5EB" alt="Weights" /></a>
+    <a href="https://huggingface.co/depth-anything/DA3-LARGE-1.1"><img src="https://img.shields.io/badge/DA3%20Weights-HuggingFace-C9E4CA?labelColor=EAF5EB" alt="DA3 Weights" /></a>
   </p>
 
 </div>
@@ -76,7 +76,7 @@ python tools/download_weights.py wan2.2 da3                # 1: train GEM-4D Wan
 | `Wan2.1-I2V-14B-480P/` | [`Wan-AI/Wan2.1-I2V-14B-480P`](https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-480P) | Wan-14B base: DiT, VAE, CLIP, umT5, tokenizer |
 | `Wan2.2-TI2V-5B-Diffusers/` | [`Wan-AI/Wan2.2-TI2V-5B-Diffusers`](https://huggingface.co/Wan-AI/Wan2.2-TI2V-5B-Diffusers) | Wan-5B base |
 | `gem-4d-wan14b/` | [`kaichen-z/Gem-4D`](https://huggingface.co/datasets/kaichen-z/Gem-4D) | GEM-4D-Wan14B DiT ([4](#4-gem-4d-wan14b-checkpoint)) |
-| `da3/` | [`zhouk777/gem4d-weight`](https://huggingface.co/datasets/zhouk777/gem4d-weight) (= [DA3-LARGE-1.1](https://huggingface.co/depth-anything/DA3-LARGE-1.1)) | geometry teacher (training), depth (4D-process) |
+| `da3/` | [Official DA3-LARGE-1.1](https://huggingface.co/depth-anything/DA3-LARGE-1.1) | geometry teacher (training), depth (4D-process) |
 
 CLIPSeg (`CIDAS/clipseg-rd64-refined`, foreground gate of the 4D-process) and RAFT-small (torchvision)
 download on first use.

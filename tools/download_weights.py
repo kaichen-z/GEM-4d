@@ -1,7 +1,6 @@
 """Download the weights GEM-4D trains from.
 
-    da3            DepthAnything-3 geometry teacher (DA3-LARGE-1.1), from ``zhouk777/gem4d-weight``
-                   (dataset)                                                (~1.6 GB) -> geometry.teacher
+    da3          depth-anything/DA3-LARGE-1.1  (official geometry teacher)   (~1.6 GB) -> geometry.teacher
     gem-4d-wan14b  GEM-4D-Wan14B DiT (transformer/), from ``kaichen-z/Gem-4D`` (dataset)
                                                                             (~33 GB)  -> --weights /
                    backbone.init_weights (needs the wan2.1 folder for VAE, CLIP, umT5, tokenizer)
@@ -23,10 +22,10 @@ import sys
 from huggingface_hub import snapshot_download
 
 FOLDERS = {  # name -> (HF dataset repo holding <name>/, description)
-    "da3": ("zhouk777/gem4d-weight", "DepthAnything-3 geometry teacher (~1.6 GB)"),
     "gem-4d-wan14b": ("kaichen-z/Gem-4D", "GEM-4D-Wan14B DiT (~33 GB)"),
 }
 EXTERNAL = {  # name -> (HF model repo, local folder)
+    "da3": ("depth-anything/DA3-LARGE-1.1", "da3"),
     "wan2.2": ("Wan-AI/Wan2.2-TI2V-5B-Diffusers", "Wan2.2-TI2V-5B-Diffusers"),
     "wan2.1": ("Wan-AI/Wan2.1-I2V-14B-480P", "Wan2.1-I2V-14B-480P"),
 }
